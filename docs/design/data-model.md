@@ -166,10 +166,11 @@ touched ([consistency §5](consistency.md#5-durable-operations)). Small edits ar
 | `status` | `'held' \| 'pending' \| 'dispatched' \| 'running' \| 'committed' \| 'applied' \| 'failed' \| 'rolled_back' \| 'cancelled'` | Every transition is a CAS on `(opId, expectedStatus, token, attempt)`; `committed` = all its table commits exist; `applied` = published ([consistency §5.2](consistency.md#52-status-machine)) |
 | `token` | number | Lease token that committed it (checked on roll-forward) |
 | `committedTableVersions` | `{ <table>: version }` | Sent with `committed` |
+| `commit` | `{ baseRevision, tableVersions, result }` \| null | Sent with `committed`: what a later lease holder publishes when it rolls the operation forward — it never re-runs it ([consistency §5.3](consistency.md#53-boundaries)) |
 | `appliedRevision` | number \| null | Set by publish |
 | `attempt` | number | Incremented on every move to `running`; carried in every commit's metadata; poison after a configured limit → `failed` |
 | `rolledBackAttempts` | number[] | Attempts reconciliation rolled back — their commits never count ([consistency §5.3](consistency.md#53-boundaries)) |
-| `result` | `{ rowsAdded, rowsRemoved, rowsChanged, changedFieldIds, batchId }` \| null | |
+| `result` | `{ rowsAdded, rowsRemoved, rowsChanged, changedFieldIds, touchedFieldIds, batchId }` \| null | `changedFieldIds` → staleness; `touchedFieldIds` (fields whose existing values the job rewrote) → the publish rebase check |
 | `error` | `{ code, message }` \| null | User-safe |
 | `createdAt`, `committedAt`, `appliedAt` | Date | |
 

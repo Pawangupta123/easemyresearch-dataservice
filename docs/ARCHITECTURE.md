@@ -1,6 +1,6 @@
 # Architecture
 
-**As of:** 2026-10-24 (`a14618e`) · Design (source of truth): [design/](design/README.md) ·
+**As of:** 2026-10-24 (`191c255`) · Design (source of truth): [design/](design/README.md) ·
 Progress: [STATUS.md](STATUS.md)
 
 ## 1. Where the service sits
@@ -42,8 +42,9 @@ Here:    router.py ─→ schemas.py ──→ service.py → repository.py → 
 | Repository | `modules/<name>/repository.py` | Data access — reads through `storage/reader.py`, writes through `storage/fenced_commit.py` |
 | Model | `modules/<name>/tables.py` | Delta table definitions |
 
-Only `modules/health/` (`router.py`, `schemas.py`) exists so far; a module's files are created
-when it is built — no empty placeholders.
+Built so far: `modules/health/` (`router.py`, `schemas.py`) and `modules/writer/` (`service.py`:
+run a Delta-job operation, recover after a takeover — no routes yet). A module's files are
+created when it is built — no empty placeholders.
 
 ## 3. Folder map
 
@@ -58,15 +59,20 @@ src/dataservice/
 │   ├── auth.py              require_service_token (on every route)
 │   └── utils/service_token.py   sign / verify (pure)
 ├── storage/
-│   ├── fenced_commit.py     the ONLY Delta write gate (append, fence, restore)
+│   ├── fenced_commit.py     the ONLY Delta write gate (append, overwrite, fence, restore)
 │   ├── reconcile.py         fence every table, then reconcile
 │   ├── lease.py             Lease + LeaseAuthority (the contract Node serves)
+│   ├── operations.py        OperationAuthority + Commit / JobResult / PublishRequest (the job contract)
 │   ├── snapshot.py          Snapshot (base version + patch range), PatchSource, PATCH_SCHEMA
 │   ├── mongo_patches.py     MongoPatchSource: reads dataset_patches (read-only)
-│   └── reader.py            the ONE reader: base + patches → the revision's rows
-└── modules/health/          GET /health
-prototype/node_side/lease_store.py   REFERENCE Node logic: the Mongo writer lease
-prototype/node_side/edit_store.py    REFERENCE Node logic: the small-edit transaction (hybrid edits)
+│   ├── reader.py            the ONE reader: base + patches → the revision's rows
+│   └── compaction.py        fold a revision's patches into the base
+└── modules/
+    ├── health/              GET /health
+    └── writer/service.py    run_append_rows · recover (fence + reconcile + roll forward)
+prototype/node_side/                 REFERENCE Node logic (Mongo), ported to TypeScript in Phase 2:
+    lease_store.py · edit_store.py · undo_store.py · compaction_store.py ·
+    operation_store.py · publish_store.py · authority.py (the writer's door) · documents.py
 probes/c0_real_s3.py                 C0 on the real AWS test bucket (on demand, env credentials)
 probes/delta_api_probe.py            live facts about delta-rs / DuckDB
 scripts/check_commit_msg.py          commit-msg hook
@@ -130,13 +136,14 @@ error:   { "success": false, "message": "…", "errors"?: [{ field, message }], 
 | Direction | Today (built) | Design |
 |---|---|---|
 | Node → Data Service | `x-service-token: <issuedAt>.<HMAC-SHA256(secret, issuedAt)>` on every route; shared `SERVICE_TOKEN_SECRET` | Short-lived token with `datasetId`, `scope`, `rowScope` ([design/api.md §2](design/api.md#2-internal-api-node--data-service)) |
-| Data Service → Node | `LeaseAuthority` protocol (`acquire`, `renew`, `release`) — implemented only by the reference store in tests | HMAC-signed internal endpoints: lease, manifest, operations, publish, freeze, pins ([design/api.md §3](design/api.md#3-internal-api--data-service--node-writer-endpoints)) |
+| Data Service → Node | `LeaseAuthority` (`acquire`, `renew`, `release`) and `OperationAuthority` (`manifest`, `payload`, `running`, `committed`, `failed`, `committed_operations`, `rolled_back`, `publish`) — implemented by the reference Node side in tests; every call token-checked against the live lease | HMAC-signed internal endpoints: lease, manifest, operations, publish, freeze, pins ([design/api.md §3](design/api.md#3-internal-api--data-service--node-writer-endpoints)) |
 | Data Service ← Mongo | `MongoPatchSource` (`storage/mongo_patches.py`) reads `dataset_patches` with `from_seq < seq ≤ to_seq`, read-only | Same, with a read-only Mongo user limited to `dataset_patches` |
 
 **`prototype/node_side/`** holds the **reference implementation of Node's side**: the
-Mongo lease store (CAS on the expected previous token, `$$NOW`, a publish guard that writes the
-lease row) and the small-edit transaction (idempotency, revision CAS, patches, change log, unique
-claims, revision, `Form.dataVersion`, event outbox — all or nothing, in the documented shapes). It exists so the Phase 0 protocol tests can run end to end in Python; Node ports
+lease (CAS on the expected previous token, `$$NOW`, a publish guard that writes the lease row),
+the small-edit transaction, undo, compaction publish + patch purge, the Delta-job operation
+queue (CAS status machine), the publish transaction, and the writer's door (`authority.py`) —
+all in the documented shapes ([design/data-model.md](design/data-model.md)). It exists so the Phase 0 protocol tests can run end to end in Python; Node ports
 exactly this logic to TypeScript in Phase 2. `src/` never imports it (test-enforced), and CI
 type-checks and lints it.
 

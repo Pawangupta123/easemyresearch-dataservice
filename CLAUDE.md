@@ -24,14 +24,14 @@ src/dataservice/
 ├── config/         settings.py (every tunable; refuses unsafe configs) · logging.py
 ├── common/         errors.py (domain errors → HTTP) · auth.py (service token) · utils/ (pure)
 ├── storage/        fenced_commit.py — the ONLY gate for Delta writes · reader.py — the ONLY Delta reader ·
-│                   reconcile.py · lease.py · snapshot.py (manifest view, PatchSource) ·
-│                   mongo_patches.py (reads dataset_patches, read-only)
+│                   reconcile.py · lease.py · operations.py (job contract) · compaction.py ·
+│                   snapshot.py (manifest view, PatchSource) · mongo_patches.py (read-only)
 ├── types/          shared types (add when a second module needs one)
 └── modules/<name>/ router.py · schemas.py · service.py · repository.py · tables.py
 tests/unit/         no services, runs on commit · tests/integration/ in-process moto S3 (+ Mongo), runs on push
                     (moto cannot serve delta-rs Parquet reads: assert on the Delta log there)
 probes/             live library probes (run in CI and on push)
-prototype/node_side/ REFERENCE Node logic (Mongo lease, publish…) for the Phase 0 protocol tests;
+prototype/node_side/ REFERENCE Node logic (lease, edits, undo, compaction, operations, publish) for the tests;
                     Node ports it to TypeScript in Phase 2. src/ never imports it (test-enforced)
 scripts/            check_commit_msg.py (commit-msg hook)
 ```

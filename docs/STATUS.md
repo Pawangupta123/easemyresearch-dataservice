@@ -1,68 +1,71 @@
 # Status — Phase 0
 
-**As of:** 2026-10-24 · branch `feat/lease-fence` at `a14618e` · nothing in production
+**As of:** 2026-10-24 · branch `feat/lease-fence` at `191c255` · nothing in production
 
 Phase 0 = scaffold + consistency prototype ([design/implementation-plan.md](design/implementation-plan.md),
 scenarios in [design/consistency.md §13](design/consistency.md#13-phase-0-prototype--must-pass-before-phase-1)).
 Everything below was checked against the code, the tests and `git log` on 2026-10-24.
 
+`prototype/node_side/` is the **reference implementation of Node's side** (Mongo): it proves the
+protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` never imports it.
+
 ## 1. Built
 
-| What | Where | Commit (2026-10-24) |
+| What | Where | Commits |
 |---|---|---|
-| Project: uv on Python 3.12, ruff, strict mypy, ty, import-linter, pytest; git hooks; CI | `pyproject.toml`, `.githooks/`, `.github/workflows/ci.yml` | `5a0b71c`, `e082236` |
-| Service skeleton: FastAPI app on Granian, the backend's layers, `/health` | `src/dataservice/main.py`, `modules/health/` | `a15a439` |
-| Settings that refuse unsafe configs: `AWS_S3_ALLOW_UNSAFE_RENAME` forbidden, service secret ≥ 32 characters, `storage_mode` `s3` \| `local` | `config/settings.py` | `a15a439`, `2513017` |
-| Service-token auth on every route: `x-service-token: <issuedAt>.<HMAC-SHA256>`, max age from settings (default 300 s), 30 s clock skew | `common/auth.py`, `common/utils/service_token.py` | `a15a439` |
-| Node-style response envelope + one `ErrorCode` catalog; deny-by-default error handler (only user-safe messages shown) | `common/responses.py`, `common/errors.py`, `common/error_codes.py` | `13677e2` |
-| Fenced commit gate — the only place Delta is written: `txn("emr-writer", token)` + metadata (`token`, `ops = opId:attempt,…`, `opTables`, `part`), `max_commit_retries=0`, fence check; a group of operations per commit | `storage/fenced_commit.py` | `a15a439`, `5828d77`, `071c4cd` |
-| No DynamoDB lock: S3 conditional writes coordinate commits | settings, compose, `.env.example` | `2513017` |
-| C0 concurrent commits on S3 — moto in CI (10 writers); the real AWS test bucket on demand (20 writers: every success kept, the rest failed loudly — re-run 2026-10-24: 18 kept, 2 failed loudly) | `tests/integration/test_c0_concurrent_commits.py`, `probes/c0_real_s3.py` | `484027c`, `a14618e` |
-| Writer lease contract (`LeaseAuthority`) + the **reference Node side** on a real Mongo replica set: CAS on the expected previous token, Mongo clock (`$$NOW`), publish guard that writes the lease row | `storage/lease.py`, `prototype/node_side/lease_store.py` | `712b6e4`, `53a849d` |
-| Fence every table, then reconcile: roll forward the committed prefix, fenced `RESTORE` of the rest (tagged with what it removed), stop on a log that breaks the protocol | `storage/reconcile.py` | `071c4cd` |
-| The **one reader** (hybrid edits): Delta base at its version + patches with `from_seq < seq ≤ to_seq`, merged in DuckDB (rows, row state, cells); field ids validated before SQL; architecture test forbids Delta data reads elsewhere | `storage/reader.py`, `storage/snapshot.py` | `a03f86c` |
-| Mongo `PatchSource`: reads a revision's `dataset_patches` (the only Mongo collection the service touches, read-only) into the reader's patch schema | `storage/mongo_patches.py` | `8b50d2d` |
-| Hybrid small edits — the **reference Node edit transaction** on a real replica set: idempotency key (`dataset_idempotency`), revision CAS, `dataset_patches`, `dataset_changes` (typed before/after), `dataset_unique_claims`, revision manifest (`tables`, `patches {fromSeq, toSeq}`), `Form.dataVersion`, `dataset_events` — all or nothing; shapes exactly as [design/data-model.md](design/data-model.md) | `prototype/node_side/edit_store.py` | `8b50d2d`, `264c4c0` |
-| Library-facts probe (delta-rs / DuckDB behaviour the protocol relies on), run in CI and on push | `probes/delta_api_probe.py` | `a15a439` |
+| Project: uv on Python 3.12, ruff, strict mypy, ty, import-linter, pytest; git hooks with the backend's commit rules; CI with a Mongo replica set | `pyproject.toml`, `.githooks/`, `.github/workflows/ci.yml` | `5a0b71c`, `e082236`, `53a849d` |
+| Service skeleton: FastAPI on Granian, the backend's layers, `/health` | `src/dataservice/main.py`, `modules/health/` | `a15a439` |
+| Settings that refuse unsafe configs (`AWS_S3_ALLOW_UNSAFE_RENAME`, short service secret) | `config/settings.py` | `a15a439`, `2513017` |
+| Service-token auth on every route (scaffold HMAC header; the design's scoped token comes with the first internal endpoint) | `common/auth.py`, `common/utils/service_token.py` | `a15a439` |
+| Node-style response envelope + one `ErrorCode` catalog; deny-by-default errors | `common/responses.py`, `common/errors.py`, `common/error_codes.py` | `13677e2` |
+| The one Delta **write** gate: `txn("emr-writer", token)` + metadata (`token`, `ops = opId:attempt,…`, `opTables`, `part`) on append / overwrite / fence / restore | `storage/fenced_commit.py` | `a15a439`, `5828d77`, `071c4cd`, `618f1fd` |
+| No DynamoDB lock: S3 conditional writes coordinate commits — C0 on moto in CI, on the real AWS test bucket on demand | `tests/integration/test_c0_concurrent_commits.py`, `probes/c0_real_s3.py` | `484027c`, `a14618e` |
+| Writer lease: `LeaseAuthority` contract + reference Mongo store (CAS on the expected previous token, `$$NOW`, publish writes the lease row) | `storage/lease.py`, `prototype/node_side/lease_store.py` | `712b6e4` |
+| Fence every table, then reconcile (roll forward the committed prefix, fenced `RESTORE` of the rest) | `storage/reconcile.py` | `071c4cd` |
+| The one **reader**: Delta base at its version + Mongo patches `from_seq < seq ≤ to_seq` (rows, row state with `_deleted_at`, cells); architecture test forbids Delta data reads elsewhere | `storage/reader.py`, `storage/snapshot.py`, `storage/mongo_patches.py` | `a03f86c`, `8b50d2d`, `618f1fd` |
+| **Hybrid small edits** — reference Node edit transaction: idempotency, revision CAS, patches (with `at`), change log, unique claims, revision manifest, `Form.dataVersion`, event outbox; an in-transaction `check` hook; `batchId` (mutationId) apart from the request's idempotency key | `prototype/node_side/edit_store.py` | `8b50d2d`, `264c4c0`, `f1679c8` |
+| **Compaction**: fold a revision's patches into the base (refuses a base rewritten since, a dropped or retyped column); Node publishes it with `fromSeq = W`, the same `dataVersion`, no staleness; patch purge respects pins | `storage/compaction.py`, `prototype/node_side/compaction_store.py` | `618f1fd` |
+| **Undo** per cell from `dataset_changes`: preview (entries, losses, excluded, `lossSetHash`), apply as a new small edit (`undo:<batchId>`, redo = undo of the undo), losses re-checked inside the transaction | `prototype/node_side/undo_store.py` | `f1679c8` |
+| **Delta-job operations**: `data_operations` with every status move a CAS on opId + status + token + attempt; cancel only before `committed` | `prototype/node_side/operation_store.py` | `3a2b96f` |
+| **Publish + writer**: `OperationAuthority` contract; the writer runs `append_rows` (running → fenced commit → committed with its commit record → publish); Node's publish (idempotent, lease row written, rebase on `touchedFieldIds` + row ops, `dataVersion`, staleness for the form's analyses, event) | `storage/operations.py`, `modules/writer/service.py`, `prototype/node_side/publish_store.py`, `prototype/node_side/authority.py` | `ad351a3` |
+| **Crash recovery** on takeover: fence + reconcile, rolled-back attempts made runnable again, committed operations rolled forward (published, never re-run); Node's door refuses any writer call whose token is not the live lease | `modules/writer/service.py` (`recover`), `prototype/node_side/authority.py` | `191c255` |
+| Library-facts probe (delta-rs / DuckDB), run in CI and on push | `probes/delta_api_probe.py` | `a15a439` |
 
-### Tests (2026-10-24, `a14618e`, all passing with the local Mongo up)
+### Tests (2026-10-24, `191c255`, all passing with the local Mongo up; CI green)
 
-72 tests: **55 unit** (`tests/unit`: architecture 3, commit message 8, config 3, errors 7,
-fenced commit 7, health 3, mongo patches 4, reader 8, reconcile 12) and **17 integration**
-(`tests/integration`: C0 1, edits 7, lease 9). Each new rule was also mutation-tested: the code
-was broken on purpose and the matching test failed.
+**111 tests: 56 unit** (architecture 3, commit message 8, config 3, errors 7, fenced commit 7,
+health 3, mongo patches 4, reader 9, reconcile 12) and **55 integration** (C0 1, compaction 6,
+edits 7, lease 9, operations 7, publish 9, recovery 4, undo 12). Every rule was also
+**mutation-tested**: the code was broken on purpose and the matching test failed.
 
-| Scenario | Test | Store |
+| Scenario | Test file | Store |
 |---|---|---|
-| C0 | `test_c0_concurrent_commits.py` | moto S3 (asserts on the Delta log) |
-| C2, C2b, C3, C3b | `test_reconcile.py` | local filesystem Delta |
-| C18, C29 | `test_lease.py` | local Mongo replica set |
-| Reader merge rules (insert / delete / restore / set / clear / revision range — main scope) | `test_reader.py` | in memory + local filesystem Delta |
-| C31 (retry lands once, reused key refused), C34 (10 users, different cells), C35 history part (later save wins, before/after kept), same cell at once, C44 (unique identifier claimed once; a rejected save writes nothing), inserted/deleted rows via Mongo patches | `test_edits.py` | local Mongo replica set + local filesystem Delta, read through the reader |
-
-C3b's test also checks the attempt rule C20 relies on (a rolled-back attempt's commit is never
-counted) at the reconcile level; C20 itself, with Node's operation states, is not built.
+| C0 | `test_c0_concurrent_commits.py`, `probes/c0_real_s3.py` | moto S3 / real AWS S3 |
+| C2, C2b, C3 (Delta level), C3b | `test_reconcile.py` | local filesystem Delta |
+| C3 (full path, both ways), C20 | `test_recovery.py` | Mongo replica set + Delta |
+| C10, C11, C35 | `test_undo.py`, `test_edits.py` | Mongo + Delta through the reader |
+| C15 | `test_publish.py` | Mongo + Delta |
+| C18, C29 | `test_lease.py` | Mongo replica set |
+| C28, C31 (jobs), C32 | `test_operations.py` | Mongo replica set |
+| C31 (edits), C34, C44 | `test_edits.py` | Mongo + Delta |
+| C39, C41, C42 | `test_compaction.py` | Mongo + Delta |
 
 ## 2. Not built yet
 
-**Phase 0 scenarios** still to automate: C1, C4–C17, C19–C28, C30, C32, C33, C36–C43, and the
-undo half of C35 (C19 and C42 only have the reader's merge rules so far, before any compaction
-exists).
+**Phase 0 scenarios** still to automate: C1, C4–C9, C12–C14, C16, C17, C19, C21–C27, C30,
+C33, C36–C38, C40, C43.
 
 **Phase 0 features:**
 
-- Node side beyond the lease: `data_operations` + status machine + payloads + outbox +
-  sweeper + poison handling; the publish transaction; quota reservations; `dataset_schemas`.
-- Hybrid edits: compaction (and its `dataVersion`-preserving publish), patch retention,
-  change-log trimming, undo / restore on `dataset_changes`, `freezeEpoch`, analysis staleness
-  and `RevisionBatch` in the edit transaction (the reference writes the rest), the patch `at`
-  time feeding the trash window on compaction.
-- Reader: table and follow-up scopes, the `files` value type, child tables, caches.
-- Retention pins + fenced vacuum; per-cell undo; pinned pagination.
-- Production `LeaseAuthority` (Node client); service token with the design's claims
-  (`datasetId`, `scope`, `rowScope`, `exp ≤ 60 s` — [design/api.md §2](design/api.md#2-internal-api-node--data-service)).
-- Query API endpoints, jobs (Lambda / Fargate), AWS infrastructure (plan 0.4), OpenAPI
-  contract (0.7), metrics and tracing (0.6), benchmarks (0.10).
+- Dispatcher + sweeper + poison handling; payload encryption / S3 offload; quota reservations;
+  `dataset_schemas`; field freeze; group commit for Delta jobs.
+- Reader: table and follow-up scopes, the `files` value type, child tables, caches, `_row_id`.
+- Undo of row ops (insert / delete batches); change-log trimming; retention pins + fenced vacuum;
+  whole-dataset restore; pinned pagination.
+- The production Node client (`LeaseAuthority`, `OperationAuthority` over HTTP) and the design's
+  scoped service token ([design/api.md §2](design/api.md#2-internal-api-node--data-service)).
+- Query API endpoints, jobs on Lambda / Fargate, AWS infrastructure (plan 0.4), OpenAPI contract
+  (0.7), metrics and tracing (0.6), benchmarks on real files (0.10 — needs sample files).
 
 **Phases 1–8:** not started ([design/implementation-plan.md](design/implementation-plan.md)).
 
@@ -70,29 +73,36 @@ exists).
 
 | Date | Problem | Solution |
 |---|---|---|
-| 2026-10-24 | Windows Application Control on the dev box blocks the `.venv\Scripts\*.exe` launchers, and sometimes pyarrow's `_dataset` DLL; DuckDB's delta extension can be blocked too (it loaded on a later run the same day) | Run every tool as `uv run python -m <tool>`; the probe's DuckDB-delta check always runs on Linux in CI |
-| 2026-10-24 | The MinIO image is gone from Docker Hub, and Docker Hub's CDN failed with EOF | S3 = in-process **moto** server in the integration tests; Mongo from the local `mongo:7` image (`docker-compose.yml`) |
-| 2026-10-24 | A DynamoDB lock table was planned for S3 commits | Not needed: delta-rs 1.6 commits with S3 conditional writes (zero DynamoDB requests on moto; C0 on moto and on the real AWS test bucket) — lock dropped |
-| 2026-10-24 | moto's server cannot serve delta-rs Parquet data reads (requests stall) | Integration tests on moto assert on the Delta log; read-path tests use the local filesystem (or real S3) |
-| 2026-10-24 | FastAPI's `ORJSONResponse` is deprecated | Routes declare Pydantic return types (`ApiResponse[T]`); FastAPI serialises them in Pydantic's Rust core |
-| 2026-10-24 | DuckDB 2.0 relations have no `fetchone` | `con.execute(...).fetchone()` in the probe; the reader streams with `con.sql(...).to_arrow_table()` |
-| 2026-10-24 | DuckDB 2.0 wheels exist only for CPython 3.11 / 3.12 | Python **3.12** (`.python-version`, `requires-python`) |
-| 2026-10-24 | `httpx` is stale | `httpx2` in the dev dependencies |
-| 2026-10-24 | The architecture test's write-call regex matched a plain `set.update(...)` | Pattern narrowed: `.update(` / `.delete(` count only with delta-rs's own arguments |
-| 2026-10-24 | Assumption that a `RESTORE` lowers the fence was wrong (a mutation test proved it) | Corrected: a `RESTORE` keeps the table's latest txn; it still carries the token for the race check and the audit trail |
-| 2026-10-24 | `alter.set_table_properties` refused the custom `emr.fence` property | `raise_if_not_exists=False`; the fence itself lives in the txn (a `RESTORE` drops custom properties set after its target) |
-| 2026-10-24 | The first edit-transaction prototype used its own names (`dataset_edit_keys`, `baseVersion` / `patchFrom` / `patchTo`, untyped change values) | Aligned to the documented data model in `264c4c0`; the docs are the spec |
-| 2026-10-24 | The design said a compaction moves `Form.dataVersion`, which would make the bulk-download cache recompute for no change | Decided: `dataVersion` = the latest value-changing revision; a compaction keeps it (backend `e966a6ed`) |
-| 2026-10-24 | The real-AWS C0 run existed only in commit messages | `probes/c0_real_s3.py` reproduces it from environment credentials |
+| 2026-10-24 | Windows Application Control blocks the `.venv\Scripts\*.exe` launchers and some pyarrow DLLs (`_dataset`, `_compute`); DuckDB's delta extension sometimes | Run tools as `uv run python -m <tool>`; no `pyarrow.compute` in `src/` (compaction checks types instead of casting); CI on Linux runs everything |
+| 2026-10-24 | Timezone-aware timestamps need a tz database Windows lacks | `tzdata` dependency |
+| 2026-10-24 | MinIO image gone from Docker Hub; Docker Hub CDN EOF | S3 = in-process **moto**; Mongo from the local `mongo:7` image |
+| 2026-10-24 | A DynamoDB lock table was planned | Not needed: delta-rs 1.6 commits with S3 conditional writes (C0 on moto and real S3) — dropped |
+| 2026-10-24 | moto cannot serve delta-rs Parquet data reads | moto tests assert on the Delta log; read-path tests use local filesystem Delta |
+| 2026-10-24 | FastAPI `ORJSONResponse` deprecated; DuckDB 2.0 relations have no `fetchone`; `execute()` → Arrow copies rows | Pydantic return types; `con.execute(...).fetchone()`; `con.sql(...).to_arrow_table()` |
+| 2026-10-24 | DuckDB 2.0 wheels only for CPython 3.11 / 3.12; `httpx` stale | Python 3.12; `httpx2` |
+| 2026-10-24 | `AT` is a DuckDB keyword (the patch column `at`) | Quoted `"at"` in the reader's SQL |
+| 2026-10-24 | DataFusion reads Delta strings as `string_view`; DuckDB names list items `item` | Compaction compares against the Delta table's own schema, list child names ignored |
+| 2026-10-24 | A fence commit moves a table's version, so "version unchanged" would refuse every compaction after a takeover | The rebase check counts **data** commits since the base (fence / reconcile commits carry none) |
+| 2026-10-24 | The architecture regex matched `set.update(...)` | Narrowed to delta-rs's own arguments |
+| 2026-10-24 | Assumed a `RESTORE` lowers the fence (a mutation test proved it wrong) | A `RESTORE` keeps the latest txn; it still carries the token for races and audit |
+| 2026-10-24 | `alter.set_table_properties` refused `emr.fence` | `raise_if_not_exists=False`; the fence lives in the txn |
+| 2026-10-24 | Edit records first used their own names | Aligned to [design/data-model.md](design/data-model.md) (`264c4c0`); the docs are the spec |
+| 2026-10-24 | `batchId` and the idempotency key were one value, so a save in parts could not be undone as one | Separated (`f1679c8`): parts share `batchId` (mutationId), each request has its own key |
+| 2026-10-24 | A roll-forward publish was refused: the operation was committed under the old holder's token | The request carries `commitToken`; the lease is checked against the publisher (`191c255`) |
+| 2026-10-24 | Node accepted a stale writer's `running` (only the Delta fence stopped it) | Every writer call checks the live lease at Node's door (`191c255`) |
+| 2026-10-24 | Compaction would have moved `Form.dataVersion` (needless bulk-download recompute) | `dataVersion` = latest value-changing revision; compaction keeps it |
 
 ## 4. Design decision log
 
 | Date | Decision |
 |---|---|
-| 2026-10-21 | Separate Python Data Service, new repository; old forms stay on MongoDB; Delta Lake on S3 + DuckDB / Polars (not MongoDB, not Databricks); max file 10 GB; full feature parity (PRD D1–D7) |
-| 2026-10-24 | **DynamoDB lock dropped** — S3 conditional writes coordinate Delta commits (C0 passed) |
-| 2026-10-24 | **Hybrid edits (option B)** — small edits (≤ 500 rows) are Mongo `dataset_patches` written by Node in one transaction; big data and big changes stay in Delta; one reader for every read; compaction folds patches into Delta; the service reads only `dataset_patches`, read-only ([design/consistency.md §14–§15](design/consistency.md#14-small-edits--one-mongo-transaction)) |
-| 2026-10-24 | **Same cell: the later commit wins** (Google Docs style, server order); the earlier value stays in history and undo |
-| 2026-10-24 | **Multi-user editing** — any number of users edit one dataset at once; small edits serialize on the revision compare-and-set; group commit only for Delta jobs |
-| 2026-10-24 | **`dataVersion` counts value changes** — a compaction publishes a revision but keeps `Form.dataVersion`, so analysis and bulk-download caches stay valid |
-| 2026-10-24 | **Service token** — the scaffold's HMAC header stays until the design's scoped token (`datasetId`, `scope`, `rowScope`, `exp ≤ 60 s`) is built with the first internal endpoint |
+| 2026-10-21 | Separate Python Data Service, new repo; old forms stay on MongoDB; Delta on S3 + DuckDB / Polars; max file 10 GB; full feature parity (PRD D1–D7) |
+| 2026-10-24 | DynamoDB lock dropped — S3 conditional writes |
+| 2026-10-24 | **Hybrid edits** — small edits are Mongo `dataset_patches` in one Node transaction; big data and big changes in Delta; one reader; compaction folds patches; the service reads only `dataset_patches`, read-only |
+| 2026-10-24 | Same cell: the later commit wins (Google Docs style); the earlier value stays in history and undo |
+| 2026-10-24 | Multi-user editing: small edits serialize on the revision CAS; group commit only for Delta jobs |
+| 2026-10-24 | `dataVersion` counts value changes; compaction keeps it |
+| 2026-10-24 | Undo is per cell with consented losses, re-checked inside the transaction; undo of an undo is a redo |
+| 2026-10-24 | Job results split `changedFieldIds` (staleness) from `touchedFieldIds` (rebase); an append conflicts with no edit |
+| 2026-10-24 | `committed` stores the commit record; a new holder rolls forward without re-running |
+| 2026-10-24 | Service token: scaffold HMAC until the scoped token is built with the first internal endpoint |

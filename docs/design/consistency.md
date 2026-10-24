@@ -203,8 +203,10 @@ the wrapper checks `transaction_version("emr-writer") ≤ token`; a higher value
    - every other commit → **roll back** with a fenced `RESTORE` to the manifest's version. A
      `RESTORE` writes a **new** commit (it does not bring back the old version number), so it
      carries `custom_metadata = { kind: 'reconcile', rolledBack: [{ opId, attempt }] }`, and
-     Node records the attempt in the operation's `rolledBackAttempts` before it is retried
-     (with `attempt + 1`, from its payload, §5.1) or failed.
+     Node records the attempt in the operation's `rolledBackAttempts` and sets the operation back
+     to `dispatched` (`POST /internal/operations/:opId/rolled-back`, allowed only for an attempt
+     of an **older** token that never reached `committed`); its next `running` is `attempt + 1`
+     and re-runs it from its payload (§5.1) — or it is failed.
 3. Only then start new operations.
 
 Reconciliation also runs **after any rejected or failed publish**, before the next operation,
@@ -382,8 +384,11 @@ and its reservation released (`FORM_DELETED`). The edit transaction checks the s
 ### 5.3 Boundaries
 
 - **`committed`** — the writer calls `POST /internal/operations/:opId/committed
-  { token, attempt, committedTableVersions }` only after **all** of the operation's table commits
-  succeeded. Every commit also carries `custom_metadata.opTables` and `part`, so the log alone
+  { token, attempt, committedTableVersions, commit }` only after **all** of the operation's table
+  commits succeeded. `commit = { baseRevision, tableVersions, result }` is everything a publish
+  needs, so a later lease holder can roll the operation forward **without running it again**;
+  its publish names the operation's `commitToken` (checked against the operation) while the
+  lease guard checks the publisher's own token. Every commit also carries `custom_metadata.opTables` and `part`, so the log alone
   shows whether an operation is complete.
 - **`applied`** — Node's publish transaction (§6) succeeded. **Node answers the FE only on
   `applied`**; a `committed` operation may still be rolled back.
@@ -406,16 +411,20 @@ the group publishes as **one** revision. (Small edits publish through the edit t
 §14.2, which applies the same effects.)
 
 1. Guard: same `opId` already applied → idempotent 200 (§5.3). Otherwise the operation is
-   `committed` with this `token` and `attempt`, the form is active,
-   `datasets.currentRevision == n`, and the **lease row is written**:
+   `committed` with this `attempt` and with the publisher's `token` — or, for a roll-forward,
+   with the `commitToken` the request names (§5.3) — the form is active, and the **lease row
+   is written** with the publisher's own token:
    `updateOne({ datasetId, token, expiresAt: { $gt: $$NOW } }, { $set: { lastPublishedOpId: opId } })`
    must match one document (§4.1) — no match aborts the transaction.
    **Rebase check, again:** small edits do not pass through the writer, so one can publish
    between the job's commit and its publish. Node repeats the rebase check (§4.5) here, inside
-   the transaction, over the patches with `seq > W`; an incompatible one rejects the publish,
-   reconciliation rolls the job's commits back, and the job re-prepares (or freezes, §4.6). A
-   compatible edit published since the writer's manifest only makes the `currentRevision` check
-   miss: the writer re-fetches the manifest and publishes on top of the newest revision.
+   the transaction, over the patches with `seq > W`. **Incompatible** = a patch on one of the
+   job's `result.touchedFieldIds` (fields whose *existing* values it rewrote — none for an
+   append) or a row op (insert / delete / restore), and any Delta-job revision since the base;
+   it rejects the publish, reconciliation rolls the job's commits back, and the job re-prepares
+   (or freezes, §4.6). `result.changedFieldIds` is separate: it only drives staleness (an append
+   changes every field's data but touches no existing value). Compatible edits never force a
+   retry: Node publishes on top of the newest revision, and they stay on top of the job.
 2. Insert `dataset_revisions` n+1 with the new table versions and `patches.toSeq` = n's;
    `patches.fromSeq` = `W` for a job that folded patches, else n's. A revision that moves
    `fromSeq` to `W` also deletes the unique-identifier claims with `seq ≤ W` (§14.4).
