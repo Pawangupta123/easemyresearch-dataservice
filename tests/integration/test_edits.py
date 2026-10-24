@@ -25,7 +25,8 @@ ROWS = [f"r{index:02d}" for index in range(10)]
 class Lake:
     def __init__(self, client: MongoClient[Document], db: Database[Document], base_uri: str) -> None:
         self.db, self.base_uri = db, base_uri
-        self.store = MongoEditStore(client, db, unique_field="pid")
+        types = {spec.field_id: spec.value_type for spec in FIELDS}
+        self.store = MongoEditStore(client, db, types, unique_field="pid")
         self.patches = MongoPatchSource(db)
         self.store.create_dataset(DATASET, base_version=0, form_id=FORM)
 
@@ -36,13 +37,12 @@ class Lake:
             revision = int(str(dataset["currentRevision"]))
         manifest = self.db["dataset_revisions"].find_one({"datasetId": DATASET, "revision": revision})
         assert manifest is not None
+        tables, patches = manifest["tables"], manifest["patches"]
+        assert isinstance(tables, Mapping) and isinstance(patches, Mapping)
+        base = tables["base"]
+        assert isinstance(base, Mapping)
         snapshot = Snapshot(
-            DATASET,
-            self.base_uri,
-            int(str(manifest["baseVersion"])),
-            int(str(manifest["patchFrom"])),
-            int(str(manifest["patchTo"])),
-            FIELDS,
+            DATASET, self.base_uri, int(base["version"]), int(patches["fromSeq"]), int(patches["toSeq"]), FIELDS
         )
         return {row.pop("_rid"): row for row in read_rows(snapshot, self.patches).to_pylist()}
 
@@ -92,10 +92,10 @@ def test_c35_the_later_save_wins_and_history_keeps_both(lake: Lake) -> None:
     lake.edit("k1", _set_age("r00", 31.0), actor="user-a")
     lake.edit("k2", _set_age("r00", 32.0), actor="user-b")
     assert lake.rows()["r00"]["f_age"] == 32.0
-    history = list(lake.db["dataset_changes"].find({"row": "r00", "field": "age"}).sort("seq", 1))
+    history = list(lake.db["dataset_changes"].find({"target.row": "r00", "target.field": "age"}).sort("revision", 1))
     assert [(change["before"], change["after"], change["actor"]) for change in history] == [
-        (30.0, 31.0, "user-a"),
-        (31.0, 32.0, "user-b"),
+        ({"t": "num", "v": 30.0}, {"t": "num", "v": 31.0}, "user-a"),
+        ({"t": "num", "v": 31.0}, {"t": "num", "v": 32.0}, "user-b"),
     ]
 
 
@@ -134,7 +134,7 @@ def test_two_users_on_the_same_cell_at_once_the_later_commit_wins(lake: Lake) ->
     last = lake.db["dataset_patches"].find_one({"target.row": "r01"}, sort=[("seq", -1)])
     assert last is not None and isinstance(last["value"], Mapping)
     assert lake.rows()["r01"]["f_age"] == last["value"]["v"]
-    assert lake.db["dataset_changes"].count_documents({"row": "r01"}) == 2
+    assert lake.db["dataset_changes"].count_documents({"target.row": "r01"}) == 2
 
 
 def test_c31_a_retried_save_lands_once_and_a_reused_key_is_refused(lake: Lake) -> None:

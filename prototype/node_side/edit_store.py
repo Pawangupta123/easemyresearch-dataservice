@@ -15,6 +15,7 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
 
 from pymongo import MongoClient
 from pymongo.client_session import ClientSession
@@ -23,6 +24,7 @@ from pymongo.errors import DuplicateKeyError
 
 Document = dict[str, object]
 Target = tuple[str, str]  # (row, field)
+IDEMPOTENCY_TTL = timedelta(hours=24)  # config in Node; the reference keeps the documented default
 BeforeValues = Callable[[int, list[Target]], Mapping[Target, object]]
 InBase = Callable[[int, str, object], bool]
 
@@ -60,17 +62,39 @@ def _payload_hash(edits: list[Edit]) -> str:
     return hashlib.sha256(json.dumps([asdict(edit) for edit in edits], default=str).encode()).hexdigest()
 
 
+def _typed(value_type: str, value: object) -> Document:
+    """A change-log value as `{ t, v }` (docs/design/data-model.md, dataset_changes)."""
+    return {"t": "null", "v": None} if value is None else {"t": value_type, "v": value}
+
+
 class MongoEditStore:
-    def __init__(self, client: MongoClient[Document], database: Database[Document], unique_field: str | None) -> None:
-        self.client, self.db, self.unique_field = client, database, unique_field
+    """Collections and fields exactly as docs/design/data-model.md names them."""
+
+    def __init__(
+        self,
+        client: MongoClient[Document],
+        database: Database[Document],
+        field_types: Mapping[str, str],
+        unique_field: str | None,
+    ) -> None:
+        self.client, self.db = client, database
+        self.field_types, self.unique_field = dict(field_types), unique_field
         database["dataset_patches"].create_index([("datasetId", 1), ("seq", 1)], unique=True)
-        database["dataset_unique_claims"].create_index([("datasetId", 1), ("field", 1), ("value", 1)], unique=True)
-        database["dataset_edit_keys"].create_index([("datasetId", 1), ("actor", 1), ("key", 1)], unique=True)
+        database["dataset_unique_claims"].create_index([("datasetId", 1), ("fieldId", 1), ("value", 1)], unique=True)
+        database["dataset_idempotency"].create_index([("actor", 1), ("idempotencyKey", 1)], unique=True)
+        database["dataset_idempotency"].create_index("expiresAt", expireAfterSeconds=0)
 
     def create_dataset(self, dataset_id: str, base_version: int, form_id: str) -> None:
         self.db["datasets"].insert_one({"_id": dataset_id, "formId": form_id, "currentRevision": 1, "patchSeq": 0})
         self.db["dataset_revisions"].insert_one(
-            {"datasetId": dataset_id, "revision": 1, "baseVersion": base_version, "patchFrom": 0, "patchTo": 0}
+            {
+                "datasetId": dataset_id,
+                "revision": 1,
+                "tables": {"base": {"version": base_version}},
+                "patches": {"fromSeq": 0, "toSeq": 0},
+                "kind": "ingest",
+                "writerToken": None,
+            }
         )
         self.db["forms"].insert_one({"_id": form_id, "dataVersion": 1})
 
@@ -103,7 +127,7 @@ class MongoEditStore:
         in_base: InBase,
     ) -> EditResult:
         db = self.db
-        seen = db["dataset_edit_keys"].find_one({"datasetId": dataset_id, "actor": actor, "key": key}, session=session)
+        seen = db["dataset_idempotency"].find_one({"actor": actor, "idempotencyKey": key}, session=session)
         if seen is not None:  # a browser retry of a save that already landed
             if seen["payloadHash"] != payload_hash:
                 raise EditRejected("IDEMPOTENCY_MISMATCH", "this key was used for a different save")
@@ -127,6 +151,7 @@ class MongoEditStore:
         seqs = list(range(first_seq, first_seq + len(edits)))
         cells = [(edit.row, edit.field) for edit in edits if edit.op == "set" and edit.field is not None]
         old = before(revision, cells)
+        now = datetime.now(UTC)
         db["dataset_patches"].insert_many(
             [
                 {
@@ -135,33 +160,49 @@ class MongoEditStore:
                     "op": edit.op,
                     "target": {"row": edit.row, "field": edit.field, "scope": {"kind": "main", "followUp": 0}},
                     "value": {"t": edit.t, "v": edit.v} if edit.op == "set" else None,
+                    "opId": f"{key}:{seq}",
                     "batchId": key,
                     "actor": actor,
+                    "at": now,
                 }
                 for seq, edit in zip(seqs, edits, strict=True)
             ],
             session=session,
         )
-        changes = [
-            {"datasetId": dataset_id, "revision": revision + 1, "batchId": key, "row": edit.row, "field": edit.field}
-            | {"before": old.get((edit.row, edit.field)), "after": edit.v, "actor": actor, "seq": seq}
-            for seq, edit in zip(seqs, edits, strict=True)
+        changes: list[Document] = [
+            {
+                "datasetId": dataset_id,
+                "revision": revision + 1,
+                "batchId": key,
+                "target": {"row": edit.row, "field": edit.field, "scope": {"kind": "main", "followUp": 0}},
+                "before": _typed(self.field_types[edit.field], old.get((edit.row, edit.field))),
+                "after": _typed(self.field_types[edit.field], None if edit.t == "null" else edit.v),
+                "actor": actor,
+                "at": now,
+            }
+            for edit in edits
             if edit.op == "set" and edit.field is not None
         ]
         if changes:
             db["dataset_changes"].insert_many(changes, session=session)
-        self._claim_unique_values(session, dataset_id, revision, edits, in_base)
+        self._claim_unique_values(session, dataset_id, revision, edits, seqs, in_base)
 
         last = db["dataset_revisions"].find_one({"datasetId": dataset_id, "revision": revision}, session=session)
         if last is None:
             raise ValueError("revision manifest missing")
+        patches = last.get("patches")
+        if not isinstance(patches, Mapping):
+            raise ValueError("revision manifest has no patch range")
         db["dataset_revisions"].insert_one(
             {
                 "datasetId": dataset_id,
                 "revision": revision + 1,
-                "baseVersion": last["baseVersion"],
-                "patchFrom": last["patchFrom"],
-                "patchTo": seqs[-1],
+                "tables": last["tables"],  # small edits never move a Delta table
+                "patches": {"fromSeq": patches["fromSeq"], "toSeq": seqs[-1]},
+                "kind": "edit",
+                "batchId": key,
+                "writerToken": None,
+                "publishedAt": now,
             },
             session=session,
         )
@@ -175,31 +216,40 @@ class MongoEditStore:
             session=session,
         )
         result = EditResult(revision=revision + 1, seqs=seqs)
-        db["dataset_edit_keys"].insert_one(
+        db["dataset_idempotency"].insert_one(
             {
-                "datasetId": dataset_id,
                 "actor": actor,
-                "key": key,
+                "idempotencyKey": key,
                 "payloadHash": payload_hash,
+                "datasetId": dataset_id,
+                "revision": result.revision,
                 "result": {"revision": result.revision, "seqs": seqs},
+                "expiresAt": now + IDEMPOTENCY_TTL,
             },
             session=session,
         )
         return result
 
     def _claim_unique_values(
-        self, session: ClientSession, dataset_id: str, revision: int, edits: list[Edit], in_base: InBase
+        self,
+        session: ClientSession,
+        dataset_id: str,
+        revision: int,
+        edits: list[Edit],
+        seqs: list[int],
+        in_base: InBase,
     ) -> None:
         claims = self.db["dataset_unique_claims"]
-        for edit in edits:
+        for seq, edit in zip(seqs, edits, strict=True):
             if self.unique_field is None or edit.op != "set" or edit.field != self.unique_field or edit.t == "null":
                 continue
             if in_base(revision, self.unique_field, edit.v):
                 raise EditRejected("DUPLICATE_UNIQUE_ID", f"{edit.v} already exists")
-            claims.delete_many({"datasetId": dataset_id, "field": edit.field, "row": edit.row}, session=session)
+            claims.delete_many({"datasetId": dataset_id, "fieldId": edit.field, "row": edit.row}, session=session)
             try:
                 claims.insert_one(
-                    {"datasetId": dataset_id, "field": edit.field, "value": edit.v, "row": edit.row}, session=session
+                    {"datasetId": dataset_id, "fieldId": edit.field, "value": edit.v, "row": edit.row, "seq": seq},
+                    session=session,
                 )
             except DuplicateKeyError as duplicate:
                 raise EditRejected("DUPLICATE_UNIQUE_ID", f"{edit.v} already exists") from duplicate
