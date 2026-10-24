@@ -28,6 +28,25 @@ def test_no_delta_write_call_outside_the_fenced_gate() -> None:
     assert offenders == [], f"Delta writes must go through storage/fenced_commit.py: {offenders}"
 
 
+READER = SRC / "storage" / "reader.py"
+# Reading Delta DATA (not just its log/metadata): only the one reader may, because only it
+# applies the revision's patches — a raw read would show values the user already changed.
+DATA_READ_CALL = re.compile(
+    r"QueryBuilder\(|delta_scan|\.to_pyarrow|\.to_pandas\(|\.to_polars\(|scan_delta|read_delta|\.load_as_version\("
+)
+
+
+def test_no_delta_data_read_outside_the_one_reader() -> None:
+    offenders = [
+        f"{path.relative_to(SRC)}:{number}"
+        for path in SRC.rglob("*.py")
+        if path != READER
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if DATA_READ_CALL.search(line)
+    ]
+    assert offenders == [], f"Delta data is read only through storage/reader.py: {offenders}"
+
+
 TEST_ONLY_IMPORT = re.compile(r"^\s*(from|import)\s+(prototype|tests|scripts)\b")
 
 
