@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# Pre-push gate — what pre-commit leaves out:
+# 1. The whole test suite, including integration tests (they skip when `docker compose up -d`
+#    is not running; CI runs them against the services)
+# 2. The library-facts probe (consistency.md relies on these delta-rs / DuckDB behaviours)
+set -e
+uv run --quiet python -m pytest
+uv run --quiet python probes/delta_api_probe.py

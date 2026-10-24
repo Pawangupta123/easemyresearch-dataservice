@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Ruff
+        run: uv run ruff check src tests probes scripts && uv run ruff format --check src tests probes scripts
+
+      - name: Mypy (gate) + ty
+        run: uv run mypy src tests probes scripts && uv run ty check src tests probes scripts
+
+      - name: Layers
+        run: uv run lint-imports
+
+      - name: Pytest
+        run: uv run pytest
+
+      # The library facts consistency.md relies on — fails loudly if an upgrade changes them.
+      - name: Delta / DuckDB probe
+        run: uv run python probes/delta_api_probe.py

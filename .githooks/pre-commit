@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+# Pre-commit quality gate (fastest feedback first) — the backend's husky pre-commit, in Python:
+# 1. Staged Python files: ruff format + ruff check --fix, re-staged (blocks on unfixable errors)
+# 2. mypy (strict) over the whole project
+# 3. Layer contracts (import-linter)
+# 4. Unit tests (fast, no services). Integration tests run on push (.githooks/pre-push).
+set -e
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+if [ -n "$STAGED" ]; then
+  uv run --quiet ruff format $STAGED
+  uv run --quiet ruff check --fix $STAGED
+  git add $STAGED
+fi
+
+uv run --quiet python -m mypy src tests probes scripts
+uv run --quiet python -c "import sys; from importlinter.cli import lint_imports_command; sys.argv=['lint-imports']; lint_imports_command()"
+uv run --quiet python -m pytest tests/unit
