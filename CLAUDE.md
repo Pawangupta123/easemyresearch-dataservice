@@ -37,8 +37,11 @@ files when it is built — no empty placeholders.
 - No hardcoding: tunables in `config/settings.py`. Files ≤ 300–400 lines. Helpers in `utils/` pure.
 - No `Any`, mypy strict, ruff clean. Every change updates its tests; prove a new test fails on
   the old code.
-- Routes return Pydantic models (FastAPI serialises in Pydantic's Rust core — no ORJSONResponse,
-  it is deprecated).
+- Responses use the backend's envelope (`common/responses.py`): routes return `ApiResponse[T]` via
+  `ok(data, message)`; errors are raised as `common/errors.py` subclasses with an `ErrorCode`
+  (`common/error_codes.py`, never rename a code) and shaped only by the registered handlers —
+  `{ success: false, message, errors?, data: { code } }`, user-safe messages only. FastAPI
+  serialises the Pydantic return type in its Rust core (no ORJSONResponse — deprecated).
 - Live-probe a library's behaviour before relying on it; add the fact to `probes/`.
 
 ## Commits — same as the backend
