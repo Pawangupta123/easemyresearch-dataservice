@@ -20,21 +20,11 @@ from pymongo.client_session import ClientSession
 from pymongo.database import Database
 
 from dataservice.storage.lease import Lease
+from prototype.node_side.documents import int_at as _int
 from prototype.node_side.edit_store import EditRejected
 from prototype.node_side.lease_store import MongoLeaseStore
 
 Document = dict[str, object]
-
-
-def _int(document: Mapping[str, object], *path: str) -> int:
-    value: object = document
-    for key in path:
-        if not isinstance(value, Mapping):
-            raise ValueError(f"malformed document at {'.'.join(path)}: {document}")
-        value = value.get(key)
-    if not isinstance(value, int):
-        raise ValueError(f"malformed number at {'.'.join(path)}: {document}")
-    return value
 
 
 class MongoCompactionStore:
