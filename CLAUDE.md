@@ -1,7 +1,16 @@
 # EaseMyResearch Data Service (Python 3.12 / FastAPI / delta-rs / DuckDB)
 
-Design lives in the backend repo: `../Desktop/EaseMyResearch_Backend_V1/docs/architecture/data-service/`.
-**consistency.md is the contract** — read it before touching any write path.
+Design lives in the backend repo: `../Desktop/EaseMyResearch_Backend_V1/docs/architecture/data-service/`,
+with an identical copy in [docs/design/](docs/design/README.md) (change both together).
+**consistency.md is the contract** — read it before touching any write or read path.
+Start here: [docs/STATUS.md](docs/STATUS.md) (what is built, what is not, problems solved,
+decisions) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/ONBOARDING.md](docs/ONBOARDING.md).
+
+**Hybrid edits (decided 2026-10-24):** small edits (≤ 500 rows) are Mongo `dataset_patches`
+that Node writes in one transaction — no Delta commit, lease or queue. Big data and big
+changes (ingest, transforms, set-based edits, compaction, restore) stay Delta jobs under the
+lease. Every read of a revision goes through the one reader (Delta at the manifest's versions +
+the revision's patch range).
 
 ## Layout — the backend's layers, in Python
 
@@ -14,7 +23,9 @@ src/dataservice/
 ├── main.py         app factory: settings, logging, error handlers, routers
 ├── config/         settings.py (every tunable; refuses unsafe configs) · logging.py
 ├── common/         errors.py (domain errors → HTTP) · auth.py (service token) · utils/ (pure)
-├── storage/        fenced_commit.py — the ONLY gate for Delta writes; manifest; Node client
+├── storage/        fenced_commit.py — the ONLY gate for Delta writes · reader.py — the ONLY Delta reader ·
+│                   reconcile.py · lease.py · snapshot.py (manifest view, PatchSource) ·
+│                   mongo_patches.py (reads dataset_patches, read-only)
 ├── types/          shared types (add when a second module needs one)
 └── modules/<name>/ router.py · schemas.py · service.py · repository.py · tables.py
 tests/unit/         no services, runs on commit · tests/integration/ in-process moto S3 (+ Mongo), runs on push
@@ -33,8 +44,11 @@ files when it is built — no empty placeholders.
 
 - Every Delta write goes through `storage/fenced_commit.py` (txn token + `{opId, attempt,
   opTables, part}`); `tests/unit/test_architecture.py` fails on any write call elsewhere.
-- Readers read only the manifest's per-table versions; never "latest".
-- The service never reads MongoDB for product data and never publishes: Node does (consistency §6).
+- Every read goes through `storage/reader.py`: the manifest's per-table versions + the patches
+  with `from_seq < seq ≤ to_seq`; never "latest". `tests/unit/test_architecture.py` fails on any
+  Delta data read elsewhere.
+- The service reads only `dataset_patches` from MongoDB, read-only, and never publishes: Node
+  does (consistency §6, §14).
 - S3 commits are coordinated by S3 conditional writes (delta-rs ≥ 1.6 refuses to commit without them; C0 proves no commit is ever overwritten). No lock table. Startup refuses `AWS_S3_ALLOW_UNSAFE_RENAME`.
 - No hardcoding: tunables in `config/settings.py`. Files ≤ 300–400 lines. Helpers in `utils/` pure.
 - No `Any`, mypy strict, ruff clean. Every change updates its tests; prove a new test fails on
