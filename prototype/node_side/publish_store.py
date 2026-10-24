@@ -48,7 +48,8 @@ class MongoPublishStore:
             return _int(op, "appliedRevision")  # C15: the response was lost, the publish was not
         if not self.leases.guard_publish(session, lease, request.op_id):
             raise EditRejected("FENCED", "the lease was lost before publishing")
-        if (op.get("status"), op.get("token"), op.get("attempt")) != ("committed", lease.token, request.attempt):
+        commit_token = lease.token if request.commit_token is None else request.commit_token
+        if (op.get("status"), op.get("token"), op.get("attempt")) != ("committed", commit_token, request.attempt):
             raise EditRejected("CONFLICT", f"operation is {op.get('status')}, not committed by this attempt")
         dataset_id, form_id = str(op["datasetId"]), str(op["formId"])
         form = db["forms"].find_one({"_id": form_id}, session=session)
@@ -71,7 +72,7 @@ class MongoPublishStore:
         if latest is None or not isinstance(latest_tables, Mapping):
             raise ValueError("revision manifest missing")
         tables: Document = {str(name): version for name, version in latest_tables.items()}
-        tables.update({name: {"version": version} for name, version in request.table_versions.items()})
+        tables.update({name: {"version": version} for name, version in request.commit.table_versions.items()})
         now, revision = datetime.now(UTC), current + 1
         db["dataset_revisions"].insert_one(
             {
@@ -88,9 +89,9 @@ class MongoPublishStore:
             session=session,
         )
         db["forms"].update_one({"_id": form_id}, {"$set": {"dataVersion": revision}}, session=session)
-        if request.result.changed_field_ids:
+        if request.commit.result.changed_field_ids:
             db["analyses"].update_many(
-                {"formId": form_id, "usedFieldIds": {"$in": list(request.result.changed_field_ids)}},
+                {"formId": form_id, "usedFieldIds": {"$in": list(request.commit.result.changed_field_ids)}},
                 {"$inc": {"dataVersion": 1}},
                 session=session,
             )
@@ -102,9 +103,9 @@ class MongoPublishStore:
                     "appliedRevision": revision,
                     "appliedAt": now,
                     "result": {
-                        "rowsAdded": request.result.rows_added,
-                        "rowsChanged": request.result.rows_changed,
-                        "changedFieldIds": list(request.result.changed_field_ids),
+                        "rowsAdded": request.commit.result.rows_added,
+                        "rowsChanged": request.commit.result.rows_changed,
+                        "changedFieldIds": list(request.commit.result.changed_field_ids),
                     },
                 }
             },
@@ -115,7 +116,7 @@ class MongoPublishStore:
                 "datasetId": dataset_id,
                 "revision": revision,
                 "opId": request.op_id,
-                "changedFieldIds": list(request.result.changed_field_ids),
+                "changedFieldIds": list(request.commit.result.changed_field_ids),
                 "consumers": {"recompute": "pending", "notify": "pending"},
             },
             session=session,
@@ -125,15 +126,15 @@ class MongoPublishStore:
     def _rebase(self, session: ClientSession, dataset_id: str, request: PublishRequest) -> None:
         db = self.db
         rewrites = db["dataset_revisions"].count_documents(
-            {"datasetId": dataset_id, "revision": {"$gt": request.base_revision}, "kind": {"$ne": "edit"}},
+            {"datasetId": dataset_id, "revision": {"$gt": request.commit.base_revision}, "kind": {"$ne": "edit"}},
             session=session,
         )
         if rewrites:
             raise EditRejected("CONFLICT", "another Delta job published since the base revision; re-prepare")
-        if not request.result.touched_field_ids:
+        if not request.commit.result.touched_field_ids:
             return
         base = db["dataset_revisions"].find_one(
-            {"datasetId": dataset_id, "revision": request.base_revision}, session=session
+            {"datasetId": dataset_id, "revision": request.commit.base_revision}, session=session
         )
         if base is None:
             raise EditRejected("NOT_FOUND", "base revision not found")
@@ -141,7 +142,10 @@ class MongoPublishStore:
             {
                 "datasetId": dataset_id,
                 "seq": {"$gt": _int(base, "patches", "toSeq")},
-                "$or": [{"target.field": {"$in": list(request.result.touched_field_ids)}}, {"op": {"$ne": "set"}}],
+                "$or": [
+                    {"target.field": {"$in": list(request.commit.result.touched_field_ids)}},
+                    {"op": {"$ne": "set"}},
+                ],
             },
             session=session,
         )

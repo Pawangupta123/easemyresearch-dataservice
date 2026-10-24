@@ -11,6 +11,7 @@ from tests.integration.conftest import Document
 
 DATASET, FORM = "ds-1", "form-1"
 PAYLOAD = {"rows": [{"_rid": "r1", "f_age": 31.0}]}
+COMMIT: Document = {"baseRevision": 1, "tableVersions": {"base": 3}}  # what a later holder would publish
 
 
 @pytest.fixture
@@ -57,11 +58,11 @@ def test_only_a_pending_operation_is_dispatched_and_only_a_dispatched_one_runs(o
 def test_committed_needs_the_running_token_and_attempt_and_repeats_safely(ops: MongoOperationStore) -> None:
     op_id, attempt = _running(ops, token=1)
     with pytest.raises(EditRejected):
-        ops.committed(op_id, 1, attempt + 1, {"base": 3})
+        ops.committed(op_id, 1, attempt + 1, {"base": 3}, COMMIT)
     with pytest.raises(EditRejected):
-        ops.committed(op_id, 9, attempt, {"base": 3})
-    ops.committed(op_id, 1, attempt, {"base": 3})
-    ops.committed(op_id, 1, attempt, {"base": 3})  # the same call again is fine
+        ops.committed(op_id, 9, attempt, {"base": 3}, COMMIT)
+    ops.committed(op_id, 1, attempt, {"base": 3}, COMMIT)
+    ops.committed(op_id, 1, attempt, {"base": 3}, COMMIT)  # the same call again is fine
     op = ops.get(op_id)
     assert (op["status"], op["committedTableVersions"]) == ("committed", {"base": 3})
 
@@ -70,7 +71,7 @@ def test_c28_late_callbacks_from_an_older_attempt_change_nothing(ops: MongoOpera
     op_id, first = _running(ops, token=1)
     second = ops.running(op_id, 2)  # the writer was replaced; attempt 2 runs
     with pytest.raises(EditRejected):
-        ops.committed(op_id, 1, first, {"base": 3})  # attempt 1's delayed committed
+        ops.committed(op_id, 1, first, {"base": 3}, COMMIT)  # attempt 1's delayed committed
     with pytest.raises(EditRejected):
         ops.failed(op_id, 1, first, {"code": "X", "message": "late"}, rolled_back=False)
     op = ops.get(op_id)
@@ -89,13 +90,13 @@ def test_c32_cancel_wins_before_committed_and_is_too_late_after(ops: MongoOperat
     ops.cancel(op_id)
     ops.cancel(op_id)  # already cancelled: fine
     with pytest.raises(EditRejected):
-        ops.committed(op_id, 1, attempt, {"base": 3})  # the writer must roll back instead
+        ops.committed(op_id, 1, attempt, {"base": 3}, COMMIT)  # the writer must roll back instead
     with pytest.raises(EditRejected):
         ops.running(op_id, 2)
 
     other = ops.submit(DATASET, FORM, "user-a", "k2", "append_rows", PAYLOAD)
     ops.dispatch(other)
-    ops.committed(other, 1, ops.running(other, 1), {"base": 4})
+    ops.committed(other, 1, ops.running(other, 1), {"base": 4}, COMMIT)
     with pytest.raises(EditRejected) as late:
         ops.cancel(other)
     assert late.value.code == "TOO_LATE"

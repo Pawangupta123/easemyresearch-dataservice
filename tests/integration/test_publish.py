@@ -31,8 +31,8 @@ class Jobs:
         self.leases = MongoLeaseStore(db, ttl_ms=60_000)
         self.operations = MongoOperationStore(lake.client, db)
         self.publisher = MongoPublishStore(lake.client, db, self.leases)
-        self.authority = NodeAuthority(self.operations, self.publisher)
-        self.tables = WriterTables(lake.base_uri, {})
+        self.authority = NodeAuthority(self.operations, self.publisher, self.leases)
+        self.tables = WriterTables({"base": lake.base_uri})
 
     def lease(self, owner: str = "writer-a") -> Lease:
         lease = self.leases.acquire(DATASET, owner, max_token_seen([DeltaTable(self.lake.base_uri)]))
@@ -53,9 +53,7 @@ class Jobs:
                 captured.append(request)
                 return -1
 
-        run_append_rows(
-            op_id, self.lake.current_revision(), lease, self.tables, Capture(self.operations, self.publisher)
-        )
+        run_append_rows(DATASET, op_id, lease, self.tables, Capture(self.operations, self.publisher, self.leases))
         return captured[0]
 
 
@@ -72,7 +70,7 @@ def jobs(lake: Lake, mongo_db: Database[Document]) -> Jobs:
 
 def test_an_import_lands_as_one_published_revision(lake: Lake, jobs: Jobs) -> None:
     op_id = jobs.submit()
-    revision = run_append_rows(op_id, lake.current_revision(), jobs.lease(), jobs.tables, jobs.authority)
+    revision = run_append_rows(DATASET, op_id, jobs.lease(), jobs.tables, jobs.authority)
     assert revision == 2 and lake.current_revision() == 2
     rows = lake.rows(revision)
     assert (rows["r50"]["f_age"], rows["r51"]["f_pid"]) == (61.0, "P-51") and len(rows) == 12
@@ -111,8 +109,8 @@ def test_small_edits_meanwhile_conflict_only_on_the_fields_the_job_rewrote(lake:
     lease = jobs.lease()
     request = jobs.commit_only(jobs.submit(), lease)
     lake.edit("meanwhile", Edit(row="r00", op="set", field="pid", t="str", v="P-NEW"))
-    rewrote_age = replace(request, result=JobResult(rows_changed=10, touched_field_ids=("age",)))
-    rewrote_pid = replace(request, result=JobResult(rows_changed=10, touched_field_ids=("pid",)))
+    rewrote_age = replace(request, commit=replace(request.commit, result=JobResult(touched_field_ids=("age",))))
+    rewrote_pid = replace(request, commit=replace(request.commit, result=JobResult(touched_field_ids=("pid",))))
     with pytest.raises(EditRejected) as refused:
         jobs.publisher.publish(rewrote_pid, lease)  # the edit touched pid: re-prepare
     assert refused.value.code == "CONFLICT"
@@ -134,7 +132,7 @@ def test_another_delta_job_published_since_the_base_is_a_conflict(lake: Lake, jo
     lease = jobs.lease()
     stale = jobs.commit_only(jobs.submit("import-1"), lease)
     other = jobs.submit("import-2", {"rows": [{"_rid": "r60", "f_age": 70.0, "f_pid": "P-60"}]})
-    run_append_rows(other, lake.current_revision(), lease, jobs.tables, jobs.authority)
+    run_append_rows(DATASET, other, lease, jobs.tables, jobs.authority)
     with pytest.raises(EditRejected) as refused:
         jobs.publisher.publish(stale, lease)
     assert refused.value.code == "CONFLICT"
@@ -161,6 +159,6 @@ def test_a_bad_payload_fails_the_attempt_and_commits_nothing(lake: Lake, jobs: J
     op_id = jobs.submit("bad", {"rows": [{"_rid": "r70", "f_unknown": 1}]})
     before = DeltaTable(lake.base_uri).version()
     with pytest.raises(Exception, match="columns the dataset does not have"):
-        run_append_rows(op_id, lake.current_revision(), jobs.lease(), jobs.tables, jobs.authority)
+        run_append_rows(DATASET, op_id, jobs.lease(), jobs.tables, jobs.authority)
     op = jobs.operations.get(op_id)
     assert op["status"] == "failed" and DeltaTable(lake.base_uri).version() == before

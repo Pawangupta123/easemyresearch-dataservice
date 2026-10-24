@@ -123,7 +123,10 @@ class MongoOperationStore:
             raise EditRejected("CONFLICT", f"operation is {op.get('status')} under token {op.get('token')}")
         return int(str(moved["attempt"]))
 
-    def committed(self, op_id: str, token: int, attempt: int, table_versions: Mapping[str, int]) -> None:
+    def committed(
+        self, op_id: str, token: int, attempt: int, table_versions: Mapping[str, int], commit: Document
+    ) -> None:
+        """`commit` = what a later lease holder needs to publish it without re-running it."""
         guard: Document = {"token": token, "attempt": attempt}
         op = self.get(op_id)
         if op.get("status") == "committed" and all(op.get(k) == v for k, v in guard.items()):
@@ -131,7 +134,12 @@ class MongoOperationStore:
         self._cas(
             op_id,
             {"status": "running", **guard},
-            {"status": "committed", "committedTableVersions": dict(table_versions), "committedAt": datetime.now(UTC)},
+            {
+                "status": "committed",
+                "committedTableVersions": dict(table_versions),
+                "commit": commit,
+                "committedAt": datetime.now(UTC),
+            },
             "not the running attempt",
         )
 
@@ -140,6 +148,25 @@ class MongoOperationStore:
         self._cas(op_id, {"status": "running", "token": token, "attempt": attempt}, update, "not the running attempt")
         if rolled_back:
             self.ops.update_one({"opId": op_id}, {"$addToSet": {"rolledBackAttempts": attempt}})
+
+    def committed_for(self, dataset_id: str) -> list[Document]:
+        return list(self.ops.find({"datasetId": dataset_id, "status": "committed"}, {"_id": 0}))
+
+    def rolled_back(self, op_id: str, attempt: int, token: int) -> None:
+        """Reconciliation (by the holder of `token`) removed `attempt`'s commits: remember the
+        attempt and make the operation runnable again. Only an attempt of an OLDER token that
+        never reached `committed` can be rolled back this way."""
+        moved = self.ops.find_one_and_update(
+            {"opId": op_id, "attempt": attempt, "status": "running", "token": {"$lt": token}},
+            {"$set": {"status": "dispatched"}, "$addToSet": {"rolledBackAttempts": attempt}},
+        )
+        if moved is None:
+            op = self.get(op_id)
+            recorded = op.get("rolledBackAttempts")
+            if isinstance(recorded, list) and attempt in recorded:
+                return  # already recorded
+            raise EditRejected("CONFLICT", f"cannot roll back attempt {attempt}: operation is {op.get('status')}")
+        # a dispatched operation runs again with the next attempt (running() accepts dispatched)
 
     def cancel(self, op_id: str) -> None:
         """Wins only before `committed` (C32); after it, TOO_LATE — the operation publishes."""
