@@ -14,7 +14,7 @@ cp .env.example .env                     # then set SERVICE_TOKEN_SECRET (≥ 32
 docker compose up -d                     # local Mongo replica set on port 27018 (integration tests)
 uv run python -m pytest tests/unit       # unit tests — no services needed
 uv run python -m pytest                  # everything; integration tests skip without Mongo
-uv run python probes/delta_api_probe.py  # library facts (DuckDB delta check runs on Linux only)
+uv run python probes/delta_api_probe.py  # library facts (the DuckDB delta check may be blocked on Windows; CI runs it on Linux)
 uv run python -m granian --interface asgi dataservice.main:app --port 8100   # the API
 ```
 

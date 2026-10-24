@@ -64,7 +64,7 @@ the reader's merge rules so far, before any compaction exists).
 
 | Date | Problem | Solution |
 |---|---|---|
-| 2026-10-24 | Windows Application Control on the dev box blocks the `.venv\Scripts\*.exe` launchers, and sometimes pyarrow's `_dataset` DLL; DuckDB's delta extension is blocked there too | Run every tool as `uv run python -m <tool>`; the probe's DuckDB-delta check runs on Linux (CI) |
+| 2026-10-24 | Windows Application Control on the dev box blocks the `.venv\Scripts\*.exe` launchers, and sometimes pyarrow's `_dataset` DLL; DuckDB's delta extension can be blocked too (it loaded on a later run the same day) | Run every tool as `uv run python -m <tool>`; the probe's DuckDB-delta check always runs on Linux in CI |
 | 2026-10-24 | The MinIO image is gone from Docker Hub, and Docker Hub's CDN failed with EOF | S3 = in-process **moto** server in the integration tests; Mongo from the local `mongo:7` image (`docker-compose.yml`) |
 | 2026-10-24 | A DynamoDB lock table was planned for S3 commits | Not needed: delta-rs 1.6 commits with S3 conditional writes (zero DynamoDB requests on moto; C0 on moto and on the real AWS test bucket) — lock dropped |
 | 2026-10-24 | moto's server cannot serve delta-rs Parquet data reads (requests stall) | Integration tests on moto assert on the Delta log; read-path tests use the local filesystem (or real S3) |
