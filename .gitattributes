@@ -1,0 +1,2 @@
+# LF everywhere: the git hooks are shell scripts and CI runs on Linux.
+* text=auto eol=lf
