@@ -92,6 +92,7 @@ class MongoEditStore:
                 "revision": 1,
                 "tables": {"base": {"version": base_version}},
                 "patches": {"fromSeq": 0, "toSeq": 0},
+                "dataVersion": 1,
                 "kind": "ingest",
                 "writerToken": None,
             }
@@ -199,6 +200,7 @@ class MongoEditStore:
                 "revision": revision + 1,
                 "tables": last["tables"],  # small edits never move a Delta table
                 "patches": {"fromSeq": patches["fromSeq"], "toSeq": seqs[-1]},
+                "dataVersion": revision + 1,  # a small edit always changes values
                 "kind": "edit",
                 "batchId": key,
                 "writerToken": None,

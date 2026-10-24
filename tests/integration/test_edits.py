@@ -3,79 +3,12 @@ read back through the one reader (Delta base + Mongo patches) — C31, C34, C35,
 
 import threading
 from collections.abc import Mapping
-from pathlib import Path
 
-import pyarrow as pa
 import pytest
-from deltalake import write_deltalake
-from pymongo import MongoClient
-from pymongo.database import Database
 
-from dataservice.storage.mongo_patches import MongoPatchSource
-from dataservice.storage.reader import read_rows
-from dataservice.storage.snapshot import FieldSpec, Snapshot
-from prototype.node_side.edit_store import Edit, EditRejected, MongoEditStore, Target
-from tests.integration.conftest import Document
-
-DATASET, FORM = "ds-1", "form-1"
-FIELDS = (FieldSpec("age", "num"), FieldSpec("pid", "str"))
-ROWS = [f"r{index:02d}" for index in range(10)]
-
-
-class Lake:
-    def __init__(self, client: MongoClient[Document], db: Database[Document], base_uri: str) -> None:
-        self.db, self.base_uri = db, base_uri
-        types = {spec.field_id: spec.value_type for spec in FIELDS}
-        self.store = MongoEditStore(client, db, types, unique_field="pid")
-        self.patches = MongoPatchSource(db)
-        self.store.create_dataset(DATASET, base_version=0, form_id=FORM)
-
-    def rows(self, revision: int | None = None) -> dict[str, dict[str, object]]:
-        if revision is None:
-            dataset = self.db["datasets"].find_one({"_id": DATASET})
-            assert dataset is not None
-            revision = int(str(dataset["currentRevision"]))
-        manifest = self.db["dataset_revisions"].find_one({"datasetId": DATASET, "revision": revision})
-        assert manifest is not None
-        tables, patches = manifest["tables"], manifest["patches"]
-        assert isinstance(tables, Mapping) and isinstance(patches, Mapping)
-        base = tables["base"]
-        assert isinstance(base, Mapping)
-        snapshot = Snapshot(
-            DATASET, self.base_uri, int(base["version"]), int(patches["fromSeq"]), int(patches["toSeq"]), FIELDS
-        )
-        return {row.pop("_rid"): row for row in read_rows(snapshot, self.patches).to_pylist()}
-
-    def before(self, revision: int, cells: list[Target]) -> Mapping[Target, object]:
-        rows = self.rows(revision)
-        return {(row, field): rows.get(row, {}).get(f"f_{field}") for row, field in cells}
-
-    def in_base(self, revision: int, field: str, value: object) -> bool:
-        return any(row.get(f"f_{field}") == value for row in self.rows(revision).values())
-
-    def edit(self, key: str, *edits: Edit, actor: str = "user-a") -> int:
-        return self.store.apply(DATASET, actor, key, list(edits), self.before, self.in_base).revision
-
-
-@pytest.fixture
-def lake(mongo_client: MongoClient[Document], mongo_db: Database[Document], tmp_path: Path) -> Lake:
-    uri = str(tmp_path / "base")
-    write_deltalake(
-        uri,
-        pa.table(
-            {
-                "_rid": ROWS,
-                "_deleted_at": pa.array([None] * len(ROWS), pa.timestamp("us")),
-                "f_age": [float(30 + index) for index in range(len(ROWS))],
-                "f_pid": [f"P-{index}" for index in range(len(ROWS))],
-            }
-        ),
-    )
-    return Lake(mongo_client, mongo_db, uri)
-
-
-def _set_age(row: str, age: float) -> Edit:
-    return Edit(row=row, op="set", field="age", t="num", v=age)
+from prototype.node_side.edit_store import Edit, EditRejected
+from tests.integration.lake import DATASET, FORM, ROWS, Lake
+from tests.integration.lake import set_age as _set_age
 
 
 def test_an_edit_is_visible_at_its_revision_and_old_revisions_stay_as_they_were(lake: Lake) -> None:

@@ -7,7 +7,7 @@ Patch document (written by Node):
 """
 
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pyarrow as pa
 from pymongo.collection import Collection
@@ -36,16 +36,20 @@ def _cell(t: object, v: object) -> dict[str, object]:
     return columns
 
 
+def _utc(value: object) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)  # pymongo: naive UTC
+
+
 def to_patch_row(document: Mapping[str, object]) -> dict[str, object]:
     target, value = _as_mapping(document.get("target")), _as_mapping(document.get("value"))
     t = value.get("t")
-    return {
-        "seq": document["seq"],
-        "op": document["op"],
-        "row": target.get("row"),
-        "field": target.get("field"),
-        "t": t,
-    } | _cell(t, value.get("v"))
+    return (
+        {"seq": document["seq"], "op": document["op"], "row": target.get("row"), "field": target.get("field"), "t": t}
+        | _cell(t, value.get("v"))
+        | {"at": _utc(document.get("at"))}
+    )
 
 
 class MongoPatchSource:
@@ -55,6 +59,6 @@ class MongoPatchSource:
     def patches(self, dataset_id: str, from_seq: int, to_seq: int) -> pa.Table:
         cursor = self.patches_collection.find(
             {"datasetId": dataset_id, "seq": {"$gt": from_seq, "$lte": to_seq}},
-            {"_id": 0, "seq": 1, "op": 1, "target": 1, "value": 1},
+            {"_id": 0, "seq": 1, "op": 1, "target": 1, "value": 1, "at": 1},
         ).sort("seq", 1)
         return pa.Table.from_pylist([to_patch_row(document) for document in cursor], schema=PATCH_SCHEMA)

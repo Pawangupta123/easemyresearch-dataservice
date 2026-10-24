@@ -1,6 +1,7 @@
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -10,6 +11,8 @@ from moto.server import ThreadedMotoServer
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.errors import PyMongoError
+
+from tests.integration.lake import Lake, write_base
 
 REGION = "ap-south-1"
 BUCKET = "lake"
@@ -77,3 +80,8 @@ def s3() -> Iterator[S3]:
         }
     )
     server.stop()
+
+
+@pytest.fixture
+def lake(mongo_client: MongoClient[Document], mongo_db: Database[Document], tmp_path: Path) -> Lake:
+    return Lake(mongo_client, mongo_db, write_base(tmp_path))

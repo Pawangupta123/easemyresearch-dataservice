@@ -1,6 +1,6 @@
 """The one reader: base (Delta at its version) + patches in the revision's range (hybrid edits)."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pyarrow as pa
@@ -15,7 +15,7 @@ FIELDS = (FieldSpec("age", "num"), FieldSpec("name", "str"), FieldSpec("visit", 
 BASE = pa.table(
     {
         "_rid": ["r1", "r2", "r3"],
-        "_deleted_at": pa.array([None, None, datetime(2026, 10, 1)], pa.timestamp("us")),
+        "_deleted_at": pa.array([None, None, datetime(2026, 10, 1, tzinfo=UTC)], pa.timestamp("us", tz="UTC")),
         "f_age": [30.0, 41.0, 55.0],
         "f_name": ["Asha", "Ravi", "Meena"],
         "f_visit": pa.array([date(2026, 1, 5), None, date(2026, 2, 1)], pa.date32()),
@@ -120,3 +120,17 @@ def test_read_rows_reads_the_pinned_delta_version(tmp_path: Path) -> None:
     rows = _rows(read_rows(_snapshot(base_uri=uri, version=0, patch_to=1), source))
     assert set(rows) == {"r1", "r2"} and rows["r2"]["f_age"] == 42.0
     assert source.asked == (0, 1)
+
+
+def test_with_deleted_rows_each_row_carries_its_deleted_time() -> None:
+    deleted_at = datetime(2026, 10, 20, 9, 30, tzinfo=UTC)
+    patches = _patches(
+        _patch(1, "delete_row", "r1") | {"at": deleted_at},
+        _patch(2, "restore_row", "r3") | {"at": datetime(2026, 10, 21, tzinfo=UTC)},
+        _patch(3, "insert_row", "r9"),
+    )
+    rows = _rows(merge(BASE, patches, _snapshot(), include_deleted=True))
+    assert rows["r1"]["_deleted_at"] == deleted_at  # the delete patch's time
+    assert rows["r3"]["_deleted_at"] is None  # restored from the base's trash
+    assert rows["r2"]["_deleted_at"] is None and rows["r9"]["_deleted_at"] is None
+    assert "_deleted_at" not in merge(BASE, patches, _snapshot()).schema.names  # live view: no trash column

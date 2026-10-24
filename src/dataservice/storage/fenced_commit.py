@@ -87,6 +87,12 @@ def append(table: DeltaTable, data: pa.Table, context: CommitContext) -> None:
     write_deltalake(table, data, mode="append", commit_properties=context.commit_properties())
 
 
+def overwrite(table: DeltaTable, data: pa.Table, context: CommitContext) -> None:
+    """Replace the table's data (a base rewrite: compaction, transform) — fenced, never rebased."""
+    check_fence(table, context.token)
+    write_deltalake(table, data, mode="overwrite", commit_properties=context.commit_properties())
+
+
 def fence(table: DeltaTable, token: int) -> None:
     """A data-free commit carrying the new token (§4.3 step 1): from here on, any commit from an
     older writer either sees the higher token or races this commit and loses."""

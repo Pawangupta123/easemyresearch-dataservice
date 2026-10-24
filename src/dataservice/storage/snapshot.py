@@ -18,6 +18,9 @@ FIELD_ID = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 
 VALUE_COLUMN: dict[ValueType, str] = {"str": "v_str", "num": "v_num", "date": "v_date", "opts": "v_opts"}
 
+# Every instant is UTC: `_deleted_at` in the Delta tables and a patch's `at`.
+UTC_TIMESTAMP = pa.timestamp("us", tz="UTC")
+
 # The shape a PatchSource returns (main-scope patches; table / follow-up scopes come later).
 PATCH_SCHEMA = pa.schema(
     [
@@ -30,6 +33,7 @@ PATCH_SCHEMA = pa.schema(
         ("v_num", pa.float64()),
         ("v_date", pa.date32()),
         ("v_opts", pa.list_(pa.string())),
+        ("at", UTC_TIMESTAMP),  # when Node wrote it — a delete's time feeds the trash window
     ]
 )
 

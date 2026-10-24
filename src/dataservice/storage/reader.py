@@ -2,6 +2,8 @@
 
     rows   = base rows ∪ rows created by insert_row patches
     state  = the latest delete_row / restore_row patch of a row, else the base `_deleted_at`
+             (a delete patch's `at` becomes the row's `_deleted_at`, so the trash window survives
+             compaction)
     cell   = the latest `set` patch of (row, field) by seq ("null" = cleared), else the base value
 
 Only patches inside the revision's range count, so every reader of revision n sees exactly the
@@ -33,8 +35,10 @@ def read_rows(snapshot: Snapshot, patch_source: PatchSource, *, include_deleted:
 
 
 def merge(base: pa.Table, patches: pa.Table, snapshot: Snapshot, *, include_deleted: bool = False) -> pa.Table:
-    """Base + patches → the revision's rows, ordered by row id. Pure: no I/O."""
+    """Base + patches → the revision's rows, ordered by row id. Pure: no I/O.
+    `include_deleted` also returns trashed rows and their `_deleted_at` (compaction, trash view)."""
     con = duckdb.connect()
+    con.execute("SET TimeZone = 'UTC'")  # instants stay UTC whatever the host's zone
     con.register("base", base)
     con.register("patches", patches)
 
@@ -51,11 +55,13 @@ def merge(base: pa.Table, patches: pa.Table, snapshot: Snapshot, *, include_dele
             f' ELSE {alias}.c.v END AS "{spec.column}"'
         )
     joins = "".join(f' LEFT JOIN c{index} ON c{index}.row = r."{ROW_ID}"' for index in range(len(snapshot.fields)))
+    if include_deleted:
+        selects.append(f'r.deleted_at AS "{DELETED_AT}"')
     deleted_filter = "" if include_deleted else " WHERE NOT r.deleted"
     sql = f"""
         WITH p AS (SELECT * FROM patches WHERE seq > {int(snapshot.patch_from)} AND seq <= {int(snapshot.patch_to)}),
         state AS (
-            SELECT row, arg_max(op, seq) AS last_op FROM p
+            SELECT row, arg_max({{'op': op, 'at': "at"}}, seq) AS last FROM p  -- AT is a DuckDB keyword
             WHERE op IN ('delete_row', 'restore_row') GROUP BY row
         ),
         inserted AS (
@@ -63,11 +69,15 @@ def merge(base: pa.Table, patches: pa.Table, snapshot: Snapshot, *, include_dele
             AND row NOT IN (SELECT "{ROW_ID}" FROM base)
         ),
         all_rows AS (
-            SELECT "{ROW_ID}", "{DELETED_AT}" IS NOT NULL AS deleted_in_base FROM base
-            UNION ALL SELECT "{ROW_ID}", false FROM inserted
+            SELECT "{ROW_ID}", CAST("{DELETED_AT}" AS TIMESTAMPTZ) AS base_deleted_at FROM base
+            UNION ALL SELECT "{ROW_ID}", CAST(NULL AS TIMESTAMPTZ) FROM inserted
         ),
         r AS (
-            SELECT a."{ROW_ID}", COALESCE(s.last_op = 'delete_row', a.deleted_in_base) AS deleted
+            SELECT a."{ROW_ID}",
+                CASE WHEN s.last IS NULL THEN a.base_deleted_at
+                     WHEN s.last.op = 'delete_row' THEN s.last.at
+                     ELSE CAST(NULL AS TIMESTAMPTZ) END AS deleted_at,
+                COALESCE(s.last.op = 'delete_row', a.base_deleted_at IS NOT NULL) AS deleted
             FROM all_rows a LEFT JOIN state s ON s.row = a."{ROW_ID}"
         ){"".join("," + cell for cell in cells)}
         SELECT {", ".join(selects)}
