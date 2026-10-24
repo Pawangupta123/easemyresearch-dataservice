@@ -16,4 +16,4 @@ def require_service_token(
     if not x_service_token or not service_token.verify(
         settings.service_token_secret, x_service_token, int(time.time()), settings.service_token_max_age_seconds
     ):
-        raise UnauthorizedError("invalid service token")
+        raise UnauthorizedError("Invalid service token")
