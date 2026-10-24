@@ -13,6 +13,6 @@ if [ -n "$STAGED" ]; then
   git add $STAGED
 fi
 
-uv run --quiet python -m mypy src tests probes scripts
+uv run --quiet python -m mypy src tests probes scripts prototype
 uv run --quiet python -c "import sys; from importlinter.cli import lint_imports_command; sys.argv=['lint-imports']; lint_imports_command()"
 uv run --quiet python -m pytest tests/unit

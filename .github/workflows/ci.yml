@@ -15,19 +15,29 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Single-node replica set for the protocol tests that need Node's side (lease, publish).
+      - name: Mongo replica set
+        uses: supercharge/mongodb-github-action@1.12.0
+        with:
+          mongodb-version: "7.0"
+          mongodb-replica-set: rs0
+          mongodb-port: 27018
+
       - name: Install
         run: uv sync --locked
 
       - name: Ruff
-        run: uv run ruff check src tests probes scripts && uv run ruff format --check src tests probes scripts
+        run: uv run ruff check src tests probes scripts prototype && uv run ruff format --check src tests probes scripts prototype
 
       - name: Mypy (gate) + ty
-        run: uv run mypy src tests probes scripts && uv run ty check src tests probes scripts
+        run: uv run mypy src tests probes scripts prototype && uv run ty check src tests probes scripts prototype
 
       - name: Layers
         run: uv run lint-imports
 
       - name: Pytest
+        env:
+          REQUIRE_MONGO: "1"
         run: uv run pytest
 
       # The library facts consistency.md relies on — fails loudly if an upgrade changes them.
