@@ -5,8 +5,9 @@
 **Last updated:** 2026-10-24
 **Tech design:** [tech-design.md](tech-design.md) · **Consistency:** [consistency.md](consistency.md) · **Plan:** [implementation-plan.md](implementation-plan.md)
 
-**Vocabulary.** A **revision** is a published state of a whole dataset (`datasets.currentRevision`,
-= `Form.dataVersion`); every write publishes one. A Delta **version** is the commit number of a
+**Vocabulary.** A **revision** is a published state of a whole dataset (`datasets.currentRevision`);
+every write publishes one. `Form.dataVersion` is the latest revision that changed values (a
+compaction publishes a revision but changes no value, so it leaves `dataVersion`). A Delta **version** is the commit number of a
 single Delta table; a revision lists one version per table plus the range of small edits
 (Mongo **patches**) it includes. Users only ever see revisions.
 

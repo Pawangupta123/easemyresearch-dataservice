@@ -110,7 +110,7 @@ the scope is part of every cache key ([consistency §12](consistency.md#12-cache
 | Feature | Today | On the Data Service | Phase |
 |---|---|---|---|
 | Entry quota | `used_entries` / `Form.entryCount` deltas in the write transaction | small edits: guarded `$inc` in the edit transaction; Delta jobs: reserved **with the operation**, settled at publish ([consistency §7](consistency.md#7-quota-reservations)) | 3 |
-| `Form.dataVersion` | `$inc` in the write transaction | **= the revision**, set in the edit or publish transaction (monotonic) | 3 |
+| `Form.dataVersion` | `$inc` in the write transaction | = the latest **value-changing** revision, set in the edit or publish transaction (monotonic; a compaction leaves it) | 3 |
 | Global counts (quota usage, admin analytics) | global `countByFilter` / `Form.entryCount` | Mongo counts + `datasets.rowCount` (set in the edit or publish transaction) | 7 |
 | Storage quota | file uploads | + `datasets.storageBytes` | 7 |
 | Audit trail, permissions | `auditScope()`, `checkFormPermission` | unchanged (Node); audit written in the edit or publish transaction | 2–7 |

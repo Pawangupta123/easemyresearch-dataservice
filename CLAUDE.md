@@ -24,7 +24,8 @@ src/dataservice/
 ├── config/         settings.py (every tunable; refuses unsafe configs) · logging.py
 ├── common/         errors.py (domain errors → HTTP) · auth.py (service token) · utils/ (pure)
 ├── storage/        fenced_commit.py — the ONLY gate for Delta writes · reader.py — the ONLY Delta reader ·
-│                   reconcile.py · lease.py · snapshot.py (manifest view, PatchSource)
+│                   reconcile.py · lease.py · snapshot.py (manifest view, PatchSource) ·
+│                   mongo_patches.py (reads dataset_patches, read-only)
 ├── types/          shared types (add when a second module needs one)
 └── modules/<name>/ router.py · schemas.py · service.py · repository.py · tables.py
 tests/unit/         no services, runs on commit · tests/integration/ in-process moto S3 (+ Mongo), runs on push

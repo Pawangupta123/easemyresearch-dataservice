@@ -420,7 +420,7 @@ the group publishes as **one** revision. (Small edits publish through the edit t
    `patches.fromSeq` = `W` for a job that folded patches, else n's. A revision that moves
    `fromSeq` to `W` also deletes the unique-identifier claims with `seq ≤ W` (§14.4).
    `datasets.currentRevision = n+1`; `datasets.rowCount = manifest.rowCount`.
-3. `Form.dataVersion = n+1` (it is the revision — monotonic by construction).
+3. `Form.dataVersion = manifest.dataVersion` — the revision number of the **latest revision that changed values**; a compaction copies its predecessor's, so it never moves `dataVersion` (values are identical, C39). Monotonic by construction.
 4. A schema change carried by the operation (type cast, column add/archive) is applied to the
    form, and its mandatory `dataset_schemas` snapshot is written or reused (§2.1) — failure
    aborts the publish — so form and data never disagree.
@@ -646,7 +646,7 @@ with the same rows and values (§15.2), so a session pinned before it stays corr
 | C36 | A Delta-job group commit contains one invalid operation (duplicate unique identifier) | that operation alone is rejected; the rest publish together |
 | C37 | Crash after a Delta-job group's commits, before `committed` | the whole group rolls back and every operation retries once; no partial group published. (Not an edit scenario: a crash inside an edit transaction leaves nothing — Mongo aborts it) |
 | C38 | 20 users typing continuously for a minute (benchmark) | edit-to-visible latency within the PRD target; edit-transaction time and CAS retry rate measured |
-| C39 | Compaction equivalence | every cell, row state and row count identical through the reader before and after compaction |
+| C39 | Compaction equivalence | every cell, row state and row count identical through the reader before and after compaction; `Form.dataVersion` unchanged |
 | C40 | An analysis reads while a compaction commits and publishes | the analysis reads its one pinned revision only — never base of one revision with patches of another |
 | C41 | Patch deletion after compaction while an older revision is pinned (job, session, restore window) | patches deleted only when no retained or pinned revision has `fromSeq` below them; the pinned revision stays readable |
 | C42 | Rows inserted by small edits only, some deleted / restored, before and after compaction | correct rows, states and values both before and after; each gets a `_row_id` once, at compaction |
@@ -692,7 +692,7 @@ Node, for one small edit:
    4. Insert **`dataset_revisions` n+1**: `tables`, `maxRowId`, `schemaRef` copied from n;
       `patches = { fromSeq: n.fromSeq, toSeq: patchSeq }`; `rowCount` = n's + inserted +
       restored − deleted; `kind: 'edit'`, `batchId`, `writerToken: null`.
-   5. `Form.dataVersion = n+1`.
+   5. `manifest.dataVersion = n+1` and `Form.dataVersion = n+1` (a small edit always changes values).
    6. **Analysis staleness** for the changed fields — the same bounded `updateMany` as §6 step 5.
    7. **Change log:** one `dataset_changes` entry per changed target `{ datasetId, revision: n+1,
       batchId, target, before, after, actor, at }` (§8.1).
@@ -822,12 +822,12 @@ lease, rebase (§4):
   `_row_id`, §10) outside the lease; commit briefly under the lease.
 - **Publish:** revision n+1 on top of the current n with the new table versions,
   `patches = { fromSeq: W, toSeq: n.patches.toSeq }`, the new `maxRowId`, the same `rowCount`
-  and `schemaRef`, `changedFieldIds = []`, and the claims with `seq ≤ W` deleted (§14.4). Small
+  and `schemaRef`, the **same `dataVersion` as n**, `changedFieldIds = []`, and the claims with `seq ≤ W` deleted (§14.4). Small
   edits published after b have `seq > W` and stay on top (§4.5, C8).
 - **Values never change** (C39), so compaction marks no analysis stale and triggers no
-  recompute, and it writes no `dataset_changes`. `Form.dataVersion` still moves, because it is
-  the revision; consumers that compare `Form.dataVersion` itself — today the bulk-download cache
-  split — would see a new version after a compaction (open point for Phase 5).
+  recompute, and it writes no `dataset_changes`. It also leaves `Form.dataVersion` unchanged
+  (decided 2026-10-24): `dataVersion` counts value changes, not storage moves, so everything that
+  compares it — analysis `computedAtVersion`, the bulk-download cache split — keeps its cache.
 
 ### 15.3 Patch retention
 

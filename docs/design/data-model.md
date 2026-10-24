@@ -20,7 +20,7 @@ The Data Service reads only `dataset_patches`, read-only.
 |---|---|---|
 | `storage` | `'mongo' \| 'dataservice'` | Set once at creation, never changed (except by an explicit future move). Missing = `'mongo'` so no backfill is needed |
 | `datasetId` | ObjectId \| null | Set when `storage = 'dataservice'` |
-| `dataVersion` | number | Existing field; for `dataservice` forms it **is** the published revision (set in the edit or publish transaction) |
+| `dataVersion` | number | Existing field; for `dataservice` forms = the current manifest's `dataVersion`: the latest revision that changed values (a compaction leaves it) |
 
 Fields (`form.fields`) stay the **current** schema for both stores: label, type, options,
 value labels, order. The Delta column for a field is `f_<fieldId>`. A schema change carried by
@@ -131,6 +131,7 @@ together with the `datasets.currentRevision` move.
 | `maxRowId` | number | `_row_id` high-water mark ([consistency §10](consistency.md#10-allocation)) |
 | `schemaRef` | ObjectId | → `dataset_schemas`; mandatory post-change snapshot the data matches; never deleted while a retained revision references it |
 | `rowCount` | number | Live rows in this revision (copied to `datasets.rowCount`) |
+| `dataVersion` | number | The latest revision number that changed values; equal to `revision` except after a compaction, which copies its predecessor's (copied to `Form.dataVersion`) |
 | `kind` | operation type (job-type enum below, or `edit`) | `edit` and `compact` never appear in the user-facing version list |
 | `opId` \| `batchId` | string | Producing operation (Delta job) or small-edit batch |
 | `writerToken` | number \| null | Lease token that produced it; `null` for a small edit |

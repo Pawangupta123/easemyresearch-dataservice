@@ -1,6 +1,6 @@
 # Data Service
 
-> **Copy of the backend design (2026-10-24).** This folder and `EaseMyResearch_Backend_V1/docs/architecture/data-service/` must be kept identical — change both in the same change-set (this note is the only difference; copied from backend commit `4e8a6479`).
+> **Copy of the backend design (2026-10-24).** This folder and `EaseMyResearch_Backend_V1/docs/architecture/data-service/` must be kept identical — change both in the same change-set (this note is the only difference; copied from backend branch `docs/data-service-hybrid-edits`, commit `e966a6ed`).
 
 **Status:** Proposed · design under review · Phase 0 prototype in progress · **Last updated:** 2026-10-24
 

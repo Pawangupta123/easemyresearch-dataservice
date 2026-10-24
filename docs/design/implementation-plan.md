@@ -122,7 +122,7 @@ fan-out run.
 | # | Step |
 |---|---|
 | 5.1 | Existing Python analysis service: `RowSource` seam; `DataServiceRowSource` asking the Data Service (`rows:stream`) for today's record shape (projected columns, filters pushed down) — it never reads Delta or patches itself |
-| 5.2 | Node gateways pass `storage` + `datasetId` + the published revision manifest alongside `formId`; same `user_id` row scope as today. Open point: today's bulk-download cache split compares `Form.dataVersion`, so a compaction revision would make it recompute — decide the fix here ([consistency §15.2](consistency.md#152-compaction)) |
+| 5.2 | Node gateways pass `storage` + `datasetId` + the published revision manifest alongside `formId`; same `user_id` row scope as today. A compaction leaves `Form.dataVersion` unchanged, so the bulk-download cache split keeps working as today ([consistency §15.2](consistency.md#152-compaction)) |
 | 5.3 | Parity suite: every analysis kind on the same data in Mongo and Delta → identical results (descriptive, inferential, paired, correlation, agreement, regression, ROC, diagnostic, survival, charts, bulk report) |
 | 5.4 | Long analyses as jobs (beyond the 30 s synchronous limit) |
 | 5.5 | Columnar engines for the heaviest analyses, one at a time, behind the parity suite |

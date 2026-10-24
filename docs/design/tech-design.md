@@ -262,7 +262,7 @@ The DataStore returns a `WriteResult`; the calling service keeps the same effect
 | Concern | Today | Data Service |
 |---|---|---|
 | Entry quota | `Form.entryCount` + `Payment.used_entries` deltas | Small edit: guarded `$inc` inside the edit transaction; Delta job: reserved in the **same transaction as the operation insert**, settled at publish ([consistency §7](consistency.md#7-quota-reservations)) |
-| `Form.dataVersion` | `incrementFormDataVersion` in the write transaction | `= revision`, set in the edit or publish transaction |
+| `Form.dataVersion` | `incrementFormDataVersion` in the write transaction | = the latest value-changing revision (`manifest.dataVersion`), set in the edit or publish transaction; a compaction leaves it |
 | Analysis staleness | `markAllDirtyForForm` / `incrementVersionForColumns` | From the changed fields, in the edit or publish transaction |
 | Audit | `auditScope()` / activity log | Unchanged; the atomic audit record is written in the edit or publish transaction |
 | Revision / undo | Revision layer snapshots (Mongo) | `RevisionBatch` + `dataset_changes` in the same transaction; change-log undo ([consistency §8](consistency.md#8-history-and-undo)) |

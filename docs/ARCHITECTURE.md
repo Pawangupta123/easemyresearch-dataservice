@@ -1,6 +1,6 @@
 # Architecture
 
-**As of:** 2026-10-24 (`a03f86c`) · Design (source of truth): [design/](design/README.md) ·
+**As of:** 2026-10-24 (`a14618e`) · Design (source of truth): [design/](design/README.md) ·
 Progress: [STATUS.md](STATUS.md)
 
 ## 1. Where the service sits
@@ -62,9 +62,12 @@ src/dataservice/
 │   ├── reconcile.py         fence every table, then reconcile
 │   ├── lease.py             Lease + LeaseAuthority (the contract Node serves)
 │   ├── snapshot.py          Snapshot (base version + patch range), PatchSource, PATCH_SCHEMA
+│   ├── mongo_patches.py     MongoPatchSource: reads dataset_patches (read-only)
 │   └── reader.py            the ONE reader: base + patches → the revision's rows
 └── modules/health/          GET /health
-prototype/node_side/lease_store.py   REFERENCE Node logic (Mongo lease) for the protocol tests
+prototype/node_side/lease_store.py   REFERENCE Node logic: the Mongo writer lease
+prototype/node_side/edit_store.py    REFERENCE Node logic: the small-edit transaction (hybrid edits)
+probes/c0_real_s3.py                 C0 on the real AWS test bucket (on demand, env credentials)
 probes/delta_api_probe.py            live facts about delta-rs / DuckDB
 scripts/check_commit_msg.py          commit-msg hook
 tests/unit/ · tests/integration/     see §8
@@ -128,11 +131,12 @@ error:   { "success": false, "message": "…", "errors"?: [{ field, message }], 
 |---|---|---|
 | Node → Data Service | `x-service-token: <issuedAt>.<HMAC-SHA256(secret, issuedAt)>` on every route; shared `SERVICE_TOKEN_SECRET` | Short-lived token with `datasetId`, `scope`, `rowScope` ([design/api.md §2](design/api.md#2-internal-api-node--data-service)) |
 | Data Service → Node | `LeaseAuthority` protocol (`acquire`, `renew`, `release`) — implemented only by the reference store in tests | HMAC-signed internal endpoints: lease, manifest, operations, publish, freeze, pins ([design/api.md §3](design/api.md#3-internal-api--data-service--node-writer-endpoints)) |
-| Data Service ← Mongo | `PatchSource` protocol (`patches(dataset_id, from_seq, to_seq)`) — no Mongo implementation yet | Read-only access to `dataset_patches` |
+| Data Service ← Mongo | `MongoPatchSource` (`storage/mongo_patches.py`) reads `dataset_patches` with `from_seq < seq ≤ to_seq`, read-only | Same, with a read-only Mongo user limited to `dataset_patches` |
 
-**`prototype/node_side/`** holds the **reference implementation of Node's side** (today the
-Mongo lease store: CAS on the expected previous token, `$$NOW`, a publish guard that writes the
-lease row). It exists so the Phase 0 protocol tests can run end to end in Python; Node ports
+**`prototype/node_side/`** holds the **reference implementation of Node's side**: the
+Mongo lease store (CAS on the expected previous token, `$$NOW`, a publish guard that writes the
+lease row) and the small-edit transaction (idempotency, revision CAS, patches, change log, unique
+claims, revision, `Form.dataVersion`, event outbox — all or nothing, in the documented shapes). It exists so the Phase 0 protocol tests can run end to end in Python; Node ports
 exactly this logic to TypeScript in Phase 2. `src/` never imports it (test-enforced), and CI
 type-checks and lints it.
 
