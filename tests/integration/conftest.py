@@ -1,13 +1,46 @@
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import boto3
 import pytest
 from moto.server import ThreadedMotoServer
+from pymongo import MongoClient
+from pymongo.database import Database
+from pymongo.errors import PyMongoError
 
 REGION = "ap-south-1"
 BUCKET = "lake"
+# Local replica set from `docker compose up -d`. Never a shared or production cluster: the
+# guard below refuses any host but localhost, and every test gets its own throwaway database.
+TEST_MONGODB_URL = os.environ.get("TEST_MONGODB_URL", "mongodb://localhost:27018/?replicaSet=rs0&directConnection=true")
+
+Document = dict[str, object]
+
+
+@pytest.fixture(scope="session")
+def mongo_client() -> Iterator[MongoClient[Document]]:
+    host = urlparse(TEST_MONGODB_URL).hostname
+    if host not in {"localhost", "127.0.0.1"}:
+        raise RuntimeError(f"integration tests only run against a local Mongo, not {host}")
+    client: MongoClient[Document] = MongoClient(TEST_MONGODB_URL, serverSelectionTimeoutMS=2000)
+    try:
+        client.admin.command("ping")
+    except PyMongoError:
+        if os.environ.get("REQUIRE_MONGO") == "1":  # CI: a missing service is a failure, not a skip
+            raise
+        pytest.skip("local Mongo replica set not running — `docker compose up -d`")
+    yield client
+    client.close()
+
+
+@pytest.fixture
+def mongo_db(mongo_client: MongoClient[Document]) -> Iterator[Database[Document]]:
+    name = f"test_dataservice_{uuid4().hex[:12]}"
+    yield mongo_client[name]
+    mongo_client.drop_database(name)
 
 
 @dataclass(frozen=True)
