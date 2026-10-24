@@ -17,7 +17,8 @@ src/dataservice/
 ├── storage/        fenced_commit.py — the ONLY gate for Delta writes; manifest; Node client
 ├── types/          shared types (add when a second module needs one)
 └── modules/<name>/ router.py · schemas.py · service.py · repository.py · tables.py
-tests/unit/         no services, runs on commit · tests/integration/ docker services, runs on push
+tests/unit/         no services, runs on commit · tests/integration/ in-process moto S3 (+ Mongo), runs on push
+                    (moto cannot serve delta-rs Parquet reads: assert on the Delta log there)
 probes/             live library probes (run in CI and on push)
 scripts/            check_commit_msg.py (commit-msg hook)
 ```
@@ -32,7 +33,7 @@ files when it is built — no empty placeholders.
   opTables, part}`); `tests/unit/test_architecture.py` fails on any write call elsewhere.
 - Readers read only the manifest's per-table versions; never "latest".
 - The service never reads MongoDB for product data and never publishes: Node does (consistency §6).
-- Startup refuses S3 without the DynamoDB commit lock, and refuses `AWS_S3_ALLOW_UNSAFE_RENAME`.
+- S3 commits are coordinated by S3 conditional writes (delta-rs ≥ 1.6 refuses to commit without them; C0 proves no commit is ever overwritten). No lock table. Startup refuses `AWS_S3_ALLOW_UNSAFE_RENAME`.
 - No hardcoding: tunables in `config/settings.py`. Files ≤ 300–400 lines. Helpers in `utils/` pure.
 - No `Any`, mypy strict, ruff clean. Every change updates its tests; prove a new test fails on
   the old code.

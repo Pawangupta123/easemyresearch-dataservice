@@ -42,7 +42,7 @@ git config core.hooksPath .githooks   # once per clone: commit rules + quality g
 cp .env.example .env                  # set SERVICE_TOKEN_SECRET
 uv run python -m granian --interface asgi dataservice.main:app --port 8100
 uv run python -m pytest               # unit tests (filesystem Delta, no services)
-docker compose up -d                  # MinIO + DynamoDB Local + Mongo replica set (integration)
+docker compose up -d                  # Mongo replica set (protocol tests); S3 = in-process moto
 uv run python probes/delta_api_probe.py
 ```
 
