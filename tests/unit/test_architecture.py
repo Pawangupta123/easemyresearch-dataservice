@@ -9,8 +9,11 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "dataservice"
 GATE = SRC / "storage" / "fenced_commit.py"
+# delta-rs write APIs. `update` / `delete` only with DeltaTable's own arguments, so a plain
+# set.update(...) or dict.update(...) is not mistaken for a Delta write.
 WRITE_CALL = re.compile(
-    r"write_deltalake\(|\.merge\(|\.restore\(|\.vacuum\(|\.optimize\.|\.alter\.|\.delete\(|\.update\("
+    r"write_deltalake\(|create_write_transaction\(|\.merge\(|\.restore\(|\.vacuum\(|\.optimize\.|\.alter\."
+    r"|\.delete\(\s*(predicate\b|\))|\.update\(\s*(updates|new_values|predicate)\b"
 )
 
 

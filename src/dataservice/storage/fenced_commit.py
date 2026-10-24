@@ -1,19 +1,23 @@
 """The single gate every Delta write goes through (consistency.md §4.2).
 
-Every commit carries `txn("emr-writer", token)` plus `{ops, opTables, part}` as custom metadata,
-where `ops` lists every operation the commit holds with its attempt — one, or a whole group
-commit (§4.7). A commit without the txn would be a blind append that never conflicts, so no
-other file may call delta-rs write APIs — tests/unit/test_architecture.py enforces it.
+Every commit carries `txn("emr-writer", token)` plus custom metadata: `token`, and either `ops`
+(every operation it holds with its attempt — one, or a whole group commit, §4.7) or a `kind`
+(`fence`, `reconcile`). A commit without the txn would be a blind write that never conflicts
+with a racing writer of the same app id, so no other file may call delta-rs write APIs
+(tests/unit/test_architecture.py enforces it). (A RESTORE keeps the table's latest txn, so it
+never lowers the fence; it still carries the token for the race check and the audit trail.)
 """
 
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from deltalake import CommitProperties, DeltaTable, Transaction
+import pyarrow as pa
+from deltalake import CommitProperties, DeltaTable, Transaction, write_deltalake
 
 from dataservice.common.errors import FenceError
 
 WRITER_APP_ID = "emr-writer"
+FENCE_PROPERTY = "emr.fence"
 
 
 @dataclass(frozen=True)
@@ -36,17 +40,19 @@ class CommitContext:
             raise ValueError("a commit must carry at least one operation")
 
     def commit_properties(self, extra_metadata: dict[str, str] | None = None) -> CommitProperties:
-        metadata = {
-            "ops": format_ops(self.ops),
-            "opTables": ",".join(self.op_tables),
-            "part": str(self.part),
-            **(extra_metadata or {}),
-        }
-        return CommitProperties(
-            app_transactions=[Transaction(WRITER_APP_ID, self.token)],
-            custom_metadata=metadata,
-            max_commit_retries=0,
+        return _properties(
+            self.token,
+            {"ops": format_ops(self.ops), "opTables": ",".join(self.op_tables), "part": str(self.part)}
+            | (extra_metadata or {}),
         )
+
+
+def _properties(token: int, metadata: dict[str, str]) -> CommitProperties:
+    return CommitProperties(
+        app_transactions=[Transaction(WRITER_APP_ID, token)],
+        custom_metadata={"token": str(token)} | metadata,
+        max_commit_retries=0,
+    )
 
 
 def format_ops(ops: Iterable[OpRef]) -> str:
@@ -73,3 +79,32 @@ def max_token_seen(tables: Iterable[DeltaTable]) -> int:
     """The highest writer token committed to any of the tables (0 when none) — a new lease
     token must exceed it even if Mongo lost the stored one (§4.1)."""
     return max((table.transaction_version(WRITER_APP_ID) or 0 for table in tables), default=0)
+
+
+def append(table: DeltaTable, data: pa.Table, context: CommitContext) -> None:
+    """Append rows for the operations in `context` — fenced, never rebased onto a newer version."""
+    check_fence(table, context.token)
+    write_deltalake(table, data, mode="append", commit_properties=context.commit_properties())
+
+
+def fence(table: DeltaTable, token: int) -> None:
+    """A data-free commit carrying the new token (§4.3 step 1): from here on, any commit from an
+    older writer either sees the higher token or races this commit and loses."""
+    check_fence(table, token)
+    table.alter.set_table_properties(
+        {FENCE_PROPERTY: str(token)},
+        raise_if_not_exists=False,
+        commit_properties=_properties(token, {"kind": "fence"}),
+    )
+
+
+def restore(table: DeltaTable, version: int, token: int, rolled_back: Iterable[OpRef]) -> None:
+    """Roll the table back to `version` with a fenced RESTORE (a NEW commit, §4.3 step 2) that
+    records what it removed, so later reconciliation never counts those commits again."""
+    check_fence(table, token)
+    table.restore(
+        version,
+        commit_properties=_properties(
+            token, {"kind": "reconcile", "restoredTo": str(version), "rolledBack": format_ops(rolled_back)}
+        ),
+    )
