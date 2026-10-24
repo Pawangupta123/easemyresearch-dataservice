@@ -624,6 +624,7 @@ dependencies = [
     { name = "granian" },
     { name = "pyarrow" },
     { name = "pydantic-settings" },
+    { name = "pymongo" },
     { name = "structlog" },
 ]
 
@@ -634,7 +635,6 @@ dev = [
     { name = "import-linter" },
     { name = "moto", extra = ["server"] },
     { name = "mypy" },
-    { name = "pymongo" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "ty" },
@@ -648,6 +648,7 @@ requires-dist = [
     { name = "granian", specifier = ">=2.8.5" },
     { name = "pyarrow", specifier = ">=26.0.0" },
     { name = "pydantic-settings", specifier = ">=2.16.1" },
+    { name = "pymongo", specifier = ">=4.19.0" },
     { name = "structlog", specifier = ">=26.1.0" },
 ]
 
@@ -658,7 +659,6 @@ dev = [
     { name = "import-linter", specifier = ">=2.15" },
     { name = "moto", extras = ["server"], specifier = ">=5.2.4" },
     { name = "mypy", specifier = ">=2.4.0" },
-    { name = "pymongo", specifier = ">=4.19.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.17.2" },
     { name = "ty", specifier = ">=0.0.91" },

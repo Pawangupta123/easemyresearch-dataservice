@@ -14,6 +14,7 @@ dependencies = [
     "granian>=2.8.5",
     "pyarrow>=26.0.0",
     "pydantic-settings>=2.16.1",
+    "pymongo>=4.19.0",
     "structlog>=26.1.0",
 ]
 
@@ -31,7 +32,6 @@ dev = [
     "import-linter>=2.15",
     "moto[server]>=5.2.4",
     "mypy>=2.4.0",
-    "pymongo>=4.19.0",
     "pytest>=9.1.1",
     "ruff>=0.17.2",
     "ty>=0.0.91",
