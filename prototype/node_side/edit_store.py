@@ -27,6 +27,9 @@ Target = tuple[str, str]  # (row, field)
 IDEMPOTENCY_TTL = timedelta(hours=24)  # config in Node; the reference keeps the documented default
 BeforeValues = Callable[[int, list[Target]], Mapping[Target, object]]
 InBase = Callable[[int, str, object], bool]
+# Runs inside the transaction once revision n is fixed (the CAS holds it): raise EditRejected to
+# abort. Undo uses it to re-check its losses at the exact revision it writes on.
+Check = Callable[[int], None]
 
 
 class EditRejected(Exception):
@@ -107,11 +110,16 @@ class MongoEditStore:
         edits: list[Edit],
         before: BeforeValues,
         in_base: InBase,
+        check: Check | None = None,
+        batch_id: str | None = None,
     ) -> EditResult:
+        """`key` is the caller's idempotency key (one per request); `batch_id` (≡ today's
+        mutationId, default: the key) groups the parts of one save for history and undo."""
         payload_hash = _payload_hash(edits)
+        batch = batch_id or key
 
         def transaction(session: ClientSession) -> EditResult:
-            return self._apply(session, dataset_id, actor, key, edits, payload_hash, before, in_base)
+            return self._apply(session, dataset_id, actor, key, batch, edits, payload_hash, before, in_base, check)
 
         with self.client.start_session() as session:
             return session.with_transaction(transaction)
@@ -122,10 +130,12 @@ class MongoEditStore:
         dataset_id: str,
         actor: str,
         key: str,
+        batch: str,
         edits: list[Edit],
         payload_hash: str,
         before: BeforeValues,
         in_base: InBase,
+        check: Check | None,
     ) -> EditResult:
         db = self.db
         seen = db["dataset_idempotency"].find_one({"actor": actor, "idempotencyKey": key}, session=session)
@@ -148,6 +158,8 @@ class MongoEditStore:
         )
         if moved.matched_count != 1:
             raise EditRejected("CONFLICT", "dataset moved; retry")
+        if check is not None:
+            check(revision)
 
         seqs = list(range(first_seq, first_seq + len(edits)))
         cells = [(edit.row, edit.field) for edit in edits if edit.op == "set" and edit.field is not None]
@@ -162,7 +174,7 @@ class MongoEditStore:
                     "target": {"row": edit.row, "field": edit.field, "scope": {"kind": "main", "followUp": 0}},
                     "value": {"t": edit.t, "v": edit.v} if edit.op == "set" else None,
                     "opId": f"{key}:{seq}",
-                    "batchId": key,
+                    "batchId": batch,
                     "actor": actor,
                     "at": now,
                 }
@@ -174,7 +186,7 @@ class MongoEditStore:
             {
                 "datasetId": dataset_id,
                 "revision": revision + 1,
-                "batchId": key,
+                "batchId": batch,
                 "target": {"row": edit.row, "field": edit.field, "scope": {"kind": "main", "followUp": 0}},
                 "before": _typed(self.field_types[edit.field], old.get((edit.row, edit.field))),
                 "after": _typed(self.field_types[edit.field], None if edit.t == "null" else edit.v),
@@ -202,7 +214,7 @@ class MongoEditStore:
                 "patches": {"fromSeq": patches["fromSeq"], "toSeq": seqs[-1]},
                 "dataVersion": revision + 1,  # a small edit always changes values
                 "kind": "edit",
-                "batchId": key,
+                "batchId": batch,
                 "writerToken": None,
                 "publishedAt": now,
             },

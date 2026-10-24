@@ -80,5 +80,5 @@ class Lake:
     def in_base(self, revision: int, field: str, value: object) -> bool:
         return any(row.get(f"f_{field}") == value for row in self.rows(revision).values())
 
-    def edit(self, key: str, *edits: Edit, actor: str = "user-a") -> int:
-        return self.store.apply(DATASET, actor, key, list(edits), self.before, self.in_base).revision
+    def edit(self, key: str, *edits: Edit, actor: str = "user-a", batch: str | None = None) -> int:
+        return self.store.apply(DATASET, actor, key, list(edits), self.before, self.in_base, batch_id=batch).revision
