@@ -20,6 +20,8 @@ src/dataservice/
 tests/unit/         no services, runs on commit · tests/integration/ in-process moto S3 (+ Mongo), runs on push
                     (moto cannot serve delta-rs Parquet reads: assert on the Delta log there)
 probes/             live library probes (run in CI and on push)
+prototype/node_side/ REFERENCE Node logic (Mongo lease, publish…) for the Phase 0 protocol tests;
+                    Node ports it to TypeScript in Phase 2. src/ never imports it (test-enforced)
 scripts/            check_commit_msg.py (commit-msg hook)
 ```
 
@@ -54,7 +56,7 @@ tests + probe. No Co-Authored-By lines. One type per commit.
 ## Gates
 
 `uv run ruff check src tests probes scripts` · `uv run ruff format --check …` ·
-`uv run python -m mypy src tests probes scripts` · `uv run ty check …` · import-linter ·
+`uv run python -m mypy src tests probes scripts prototype` · `uv run ty check …` · import-linter ·
 `uv run python -m pytest`
 
 Windows dev box: Application Control blocks `.venv\Scripts\*.exe`; use `uv run python -m …`.
