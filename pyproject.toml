@@ -26,8 +26,10 @@ module-name = "dataservice"
 
 [dependency-groups]
 dev = [
+    "boto3>=1.43.118",
     "httpx2>=2.16.0",
     "import-linter>=2.15",
+    "moto[server]>=5.2.4",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "ruff>=0.17.2",
@@ -51,7 +53,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
-    "infra: needs docker compose services (MinIO, DynamoDB Local, Mongo replica set)",
+    "infra: needs docker compose services (Mongo replica set)",
 ]
 
 [tool.importlinter]

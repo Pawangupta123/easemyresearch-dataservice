@@ -1,21 +1,7 @@
-# Local stand-ins for the Phase 0 protocol tests (`pytest -m infra`):
-#   MinIO          → S3 (Delta tables)
-#   DynamoDB Local → the delta-rs S3 commit lock (consistency.md §3)
-#   Mongo          → single-node replica set (multi-document transactions need one)
+# Local Mongo for the protocol tests that need Node's side (lease, publish):
+# a single-node replica set, because multi-document transactions need one.
+# S3 needs no container — integration tests run an in-process moto server (tests/integration).
 services:
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address :9001
-    ports: ["9000:9000", "9001:9001"]
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-
-  dynamodb:
-    image: amazon/dynamodb-local:latest
-    command: -jar DynamoDBLocal.jar -inMemory -sharedDb
-    ports: ["8001:8000"]
-
   mongo:
     image: mongo:7
     command: ["--replSet", "rs0", "--bind_ip_all"]
