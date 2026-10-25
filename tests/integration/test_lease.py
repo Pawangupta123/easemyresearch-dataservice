@@ -118,7 +118,7 @@ def test_c18_a_publish_in_flight_holds_off_the_takeover_until_it_commits(
     def take_over() -> None:
         _expire(store)  # blocks behind the open transaction's write to the same row
         if store.acquire(DATASET, "writer-b", 0) is not None:
-            takeover_done_at.append(time.monotonic())
+            takeover_done_at.append(time.perf_counter())
 
     with mongo_client.start_session() as session:
         session.start_transaction()
@@ -127,7 +127,9 @@ def test_c18_a_publish_in_flight_holds_off_the_takeover_until_it_commits(
         thread.start()
         time.sleep(0.3)
         assert takeover_done_at == []  # cannot land while the publish is open
-        published_at = time.monotonic()
+        # perf_counter, not monotonic: on Windows monotonic ticks every ~15 ms, so two instants
+        # inside one tick compare equal and "strictly after" fails by chance.
+        published_at = time.perf_counter()
         session.commit_transaction()
     thread.join(timeout=10)
     assert takeover_done_at and takeover_done_at[0] > published_at  # strictly after the publish
