@@ -11,8 +11,8 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 
 ## 0. Resume here (read this first after a break or a context compaction)
 
-**Branch:** `feat/lease-fence` (dataservice) · last code commit `f48f84e` · 202 tests (117 unit,
-85 integration). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
+**Branch:** `feat/lease-fence` (dataservice) · last code commit `f48f84e` · 203 tests (117 unit,
+86 integration). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
 `22a20996` = decisions D11–D13, **not pushed**); `docs/design/` here is an identical copy
 (synced `170e2bb`) — change both together.
 
@@ -29,7 +29,7 @@ cases old-vs-new reader: 0 differences), benchmarked on 10M synthetic rows (§1 
 
 **Next, in order:**
 
-1. Data-Service-side Phase 0 scenarios (C19, C40, C43 done): C13 → C14 / C16 → C21 / C27 →
+1. Data-Service-side Phase 0 scenarios (C13, C19, C40, C43 done): C14 / C16 → C21 / C27 →
    C25 / C26 → C1 / C36 / C37 (§2). Node-side ones (C4, C8, C17, C22–C24, C30, C33, C38) run
    against Node itself.
 2. Compaction file by file (keeps row-id clustering when patches exist, bounds memory to one
@@ -104,7 +104,7 @@ is **mutation-tested** (the reader: 26 of 26 mutants killed).
 | C28, C31 (jobs), C32 | `test_operations.py` | Mongo replica set |
 | C31 (edits), C34, C44 | `test_edits.py` | Mongo + Delta |
 | C39, C41, C42 | `test_compaction.py`, `test_compaction_stream.py` | Mongo + Delta, local Delta |
-| C19, C40, C43 | `test_reads.py` | Mongo + Delta through the reader |
+| C13, C19, C40, C43 | `test_reads.py` | Mongo + Delta through the reader |
 
 ### Performance (2026-10-25, synthetic 10M rows × 50 fields = 1.1 GB Parquet, 22-core dev box)
 
@@ -134,8 +134,8 @@ ids across every row group of a compacted base.
 
 ## 2. Not built yet
 
-**Phase 0 scenarios** still to automate (19 of 45): C1, C4, C8, C9, C12–C14, C16, C17,
-C21–C27, C30, C33, C36–C38 — the Data-Service-side ones first (C13, C14, C16, C21, C25–C27, C1,
+**Phase 0 scenarios** still to automate (18 of 45): C1, C4, C8, C9, C12, C14, C16, C17,
+C21–C27, C30, C33, C36–C38 — the Data-Service-side ones first (C14, C16, C21, C25–C27, C1,
 C36, C37, C9, C12); Node-side ones run against Node itself once it is built (scope decision, §0).
 
 **Phase 0 features:**

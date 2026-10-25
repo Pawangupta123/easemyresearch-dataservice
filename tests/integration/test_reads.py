@@ -1,7 +1,7 @@
 """Reads of one revision through the one reader, end to end with the reference Node edit
 transaction on a real Mongo replica set — C19 (inserted rows before any compaction), C43 (grid,
 analysis and export give the same rows), C40 (an analysis reads its pinned revision while a
-compaction commits and publishes)."""
+compaction commits and publishes), C13 (pages stay consistent across a concurrent write)."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -90,3 +90,19 @@ def test_c40_an_analysis_reads_its_pinned_revision_while_a_compaction_lands(lake
     assert lake.rows(pinned) == expected and lake.rows(published) == expected  # compaction changed no value
     newest = lake.rows(later)
     assert newest["r00"]["f_age"] == 77.0 and "r05" not in newest and expected["r00"]["f_age"] == 31.0
+
+
+def _page(lake: Lake, revision: int, offset: int) -> list[str]:
+    page = query(lake.snapshot(revision), lake.patches, Query(sort=(Sort("age"),), limit=4, offset=offset))
+    return [str(row["_rid"]) for row in page.to_pylist()]
+
+
+def test_c13_pages_of_a_pinned_revision_stay_consistent_across_a_concurrent_write(lake: Lake) -> None:
+    pinned = lake.current_revision()  # the cursor carries the revision of its first page
+    first = _page(lake, pinned, 0)
+    # Meanwhile another user adds a row that sorts first and deletes one from the next page.
+    lake.edit("meanwhile", Edit(row="r90", op="insert_row"), set_age("r90", 1.0), Edit(row="r05", op="delete_row"))
+    rest = _page(lake, pinned, 4) + _page(lake, pinned, 8)
+    assert first + rest == [f"r{n:02d}" for n in range(10)]  # every row once, none twice, none missing
+    unpinned = _page(lake, lake.current_revision(), 4)  # without the pin, page 2 would have moved
+    assert unpinned == ["r03", "r04", "r06", "r07"] and unpinned != rest[:4]
