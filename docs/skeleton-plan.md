@@ -20,6 +20,16 @@ Progress:
     - The exported contract and its fixtures go to the start of step 3, where Node's Zod reads them.
     - `datasetId` as an ObjectId goes to the first test of step 4 (H2).
   - Timings: STATUS §1 "Skeleton query service".
+- Step 3: done (first end-to-end demo, 1M rows).
+  - Python: contract export + fixtures + drift test (`2d163b7`).
+  - Node: `bc7e7db8` models, reader, grid branch, Zod contract; `3fbcdbb1` smoke script.
+  - Changes from the step text:
+    - The cursor pins the revision with an offset (not afterRid): a pinned revision never changes, so offsets are stable, and deep offsets already take the reader's two-pass path.
+    - The storage branch reads `form.storage` from the grid's own form lookup (now selecting `storage datasetId`), so the AI tools and reports that call the same service branch too (H1).
+  - Deferred:
+    - `DataServiceGlobalCounts` (M12) to step 5.
+    - `storage` in formMetadata (M15) to step 8.
+    - The newest-first speedup waits for a nod (STATUS §0).
 
 ## Summary
 

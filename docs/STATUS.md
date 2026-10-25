@@ -1,6 +1,6 @@
 # Status — Phase 0
 
-**As of:** 2026-10-25 · branch `exp/skeleton` at `25e224a` (off `feat/lease-fence`, local only, never pushed) · nothing in production
+**As of:** 2026-10-25 · branch `exp/skeleton` at `2d163b7` (off `feat/lease-fence`, local only, never pushed) · nothing in production
 
 Phase 0 = scaffold + consistency prototype ([design/implementation-plan.md](design/implementation-plan.md),
 scenarios in [design/consistency.md §13](design/consistency.md#13-phase-0-prototype--must-pass-before-phase-1)).
@@ -12,7 +12,7 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 ## 0. Resume here (read this first after a break or a context compaction)
 
 **Branch:** `exp/skeleton` (dataservice, local only — an experiment: kept if the prototype works,
-dropped if not) · last code commit `25e224a` · 287 tests (199 unit, 88 integration). Node's side:
+dropped if not) · last code commit `2d163b7` · 288 tests (200 unit, 88 integration). Node's side:
 backend branch `exp/dataservice-skeleton` (off `feat/datastore-phase1`, local only). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
 `2c9e864c` = decision D14, **not pushed**); `docs/design/` here is an identical copy
 (synced to `2c9e864c`) — change both together.
@@ -35,10 +35,23 @@ never the backend's `.env.test` DB).
 - Step 2 done: the reader gives the grid's row shape — `_created_by` / `_created_at` /
   `_updated_at`, newest first, given row ids (`efb32cd`); `POST /v1/datasets/{id}/rows:query`,
   `rows:count`, `cells:read` (`17efab4`); fenced `create` + `probes/seed_skeleton_dataset.py`
-  (`25e224a`). Not yet: the exported contract + JSON fixtures for Node's Zod (first thing of
-  step 3); `datasetId` as ObjectId in `dataset_patches` (critic H2, first test of step 4).
-- **Next: step 3** (Node): seed the Mongo side from `seed.json`, then the grid through
-  `DataServiceRowReader`.
+  (`25e224a`). Not yet: `datasetId` as ObjectId in `dataset_patches` (critic H2, first test of
+  step 4).
+- Step 3 done — **first end-to-end demo**: Node's real grid service reads a 1M-row Data Service
+  form through the running service, page 2 by its cursor on the same revision, no overlap.
+  Contract `contracts/` + `scripts/export_contract.py` + `test_contract.py` (`2d163b7`); Node:
+  models `datasets` / `dataset_revisions` / `dataset_schemas`, `DataServiceRowReader`, the grid
+  branch in `getRecordsByFormId` (same response; search / filters / column sort / follow-up
+  columns refused with 422), contract copy + Zod + sync test (`bc7e7db8`), smoke
+  `scripts/smoke/dataservice-grid.smoke.ts` (`3fbcdbb1`). Warm, local: page newest-first
+  ~450 ms, oldest-first ~150 ms, count ~28 ms; Node adds ~20–50 ms.
+- Open from step 3: (a) newest-first pages are 3× slower — DuckDB's top-N prunes row groups by
+  `_rid` stats only when the scan meets the best rows first; fix = a stats-derived `_rid >= T`
+  bound with a full-page check and fallback (needs the user's nod); (b) form lists still count a
+  Data Service form's rows from `records` (0) — `DataServiceGlobalCounts` (critic M12) in step 5;
+  (c) `storage` in formMetadata for the FE (critic M15) in step 8; (d) on Windows call the
+  service by `127.0.0.1`: `localhost` tries IPv6 first and Python clients wait ~2 s.
+- **Next: step 4** (Node): one cell edit through bulk-edit as one Mongo transaction.
 
 **Earlier (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
 hardened after a 55-agent adversarial review (every finding fixed with a test; 12,000 random
