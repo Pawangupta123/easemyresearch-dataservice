@@ -44,8 +44,9 @@ class Queue:
     def __init__(self, lake: Lake, db: Database[Document]) -> None:
         self.lake = lake
         self.leases = MongoLeaseStore(db, ttl_ms=60_000)
-        self.operations = MongoOperationStore(lake.client, db, max_attempts=MAX_ATTEMPTS)
-        self.authority = FlakyAuthority(self.operations, MongoPublishStore(lake.client, db, self.leases), self.leases)
+        self.operations = MongoOperationStore(lake.client, db, MAX_ATTEMPTS, lake.quota, timedelta(minutes=10))
+        publisher = MongoPublishStore(lake.client, db, self.leases, lake.quota)
+        self.authority = FlakyAuthority(self.operations, publisher, self.leases)
         self.tables = WriterTables({"base": lake.base_uri})
 
     def lease(self) -> Lease:
@@ -54,7 +55,9 @@ class Queue:
         return lease
 
     def submit(self, key: str, payload: Mapping[str, object], *, dispatch: bool = True) -> str:
-        op_id = self.operations.submit(DATASET, FORM, "user-a", key, "append_rows", payload)
+        rows = payload.get("rows")
+        entries = len(rows) if isinstance(rows, list) else 0
+        op_id = self.operations.submit(DATASET, FORM, "user-a", key, "append_rows", payload, entries)
         if dispatch:
             self.operations.dispatch(op_id)
         return op_id
@@ -122,3 +125,18 @@ def test_a_lost_lease_stops_the_drain_and_leaves_the_operation_alone(lake: Lake,
     with pytest.raises(FenceError):
         drain(DATASET, lease, queue.tables, queue.authority)
     assert queue.operations.get(op_id)["status"] == "dispatched"  # the next holder will run it
+
+
+def test_an_operation_abandoned_before_its_first_commit_is_taken_over(lake: Lake, queue: Queue) -> None:
+    """Review finding: a writer that died after `running` but before any Delta commit left the
+    operation `running` forever — never re-run, its reservation held, the queue stuck."""
+    op_id = queue.submit("a", _rows(50, 51))
+    writer_a = queue.lease()
+    assert queue.authority.running(op_id, writer_a.token) == 1  # ... then writer A dies
+    queue.leases.leases.update_one({"datasetId": DATASET}, {"$set": {"expiresAt": EPOCH}})
+    writer_b = queue.lease()
+    result = drain(DATASET, writer_b, queue.tables, queue.authority)
+    assert result.applied == {op_id: 2}
+    op = queue.operations.get(op_id)
+    assert (op["status"], op["attempt"]) == ("applied", 2)
+    assert lake.quota_counters() == (12, 0)

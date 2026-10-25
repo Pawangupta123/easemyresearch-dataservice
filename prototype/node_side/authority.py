@@ -8,7 +8,7 @@ from dataservice.storage.fenced_commit import OpRef
 from dataservice.storage.lease import Lease
 from dataservice.storage.operations import Commit, CommittedOp, JobResult, Manifest, PublishRequest, QueuedOp
 from prototype.node_side.documents import int_at
-from prototype.node_side.edit_store import EditRejected
+from prototype.node_side.errors import EditRejected
 from prototype.node_side.lease_store import MongoLeaseStore
 from prototype.node_side.operation_store import MongoOperationStore
 from prototype.node_side.publish_store import MongoPublishStore
@@ -102,10 +102,14 @@ class NodeAuthority:
         self._require_lease(op_id, token)
         return self.operations.failed(op_id, token, attempt, error, retryable)
 
-    def next_operation(self, dataset_id: str) -> QueuedOp | None:
+    def next_operation(self, dataset_id: str, token: int) -> QueuedOp | None:
         head = self.operations.head(dataset_id)
-        if head is None or head.get("status") != "dispatched":
-            return None  # empty, or the head is not ready: nothing behind it may run
+        if head is None:
+            return None
+        status, owner_token = head.get("status"), head.get("token")
+        abandoned = status == "running" and isinstance(owner_token, int) and owner_token < token
+        if status != "dispatched" and not abandoned:
+            return None  # not ready (pending, committed, or running under this holder): nothing behind it runs
         return QueuedOp(op_id=str(head["opId"]), op_type=str(head["type"]))
 
     def committed_operations(self, dataset_id: str) -> list[CommittedOp]:

@@ -26,7 +26,8 @@ from pymongo.client_session import ClientSession
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from prototype.node_side.edit_store import EditRejected
+from prototype.node_side.errors import EditRejected
+from prototype.node_side.quota_store import MongoQuotaStore
 
 Document = dict[str, object]
 CANCELLABLE = ("held", "pending", "dispatched", "running")
@@ -38,9 +39,17 @@ def _payload_hash(op_type: str, payload: Mapping[str, object]) -> str:
 
 
 class MongoOperationStore:
-    def __init__(self, client: MongoClient[Document], database: Database[Document], max_attempts: int) -> None:
-        """`max_attempts` comes from Node's configuration (poison threshold, prd §4.8)."""
+    def __init__(
+        self,
+        client: MongoClient[Document],
+        database: Database[Document],
+        max_attempts: int,
+        quota: MongoQuotaStore,
+        reservation_ttl: timedelta,
+    ) -> None:
+        """`max_attempts` (poison threshold) and `reservation_ttl` come from Node's configuration."""
         self.client, self.db, self.max_attempts = client, database, max_attempts
+        self.quota, self.reservation_ttl = quota, reservation_ttl
         self.ops = database["data_operations"]
         self.ops.create_index("opId", unique=True)
         self.ops.create_index([("actor", 1), ("idempotencyKey", 1)], unique=True)
@@ -51,11 +60,19 @@ class MongoOperationStore:
     # ── submit ───────────────────────────────────────────────────────────────
 
     def submit(
-        self, dataset_id: str, form_id: str, actor: str, key: str, op_type: str, payload: Mapping[str, object]
+        self,
+        dataset_id: str,
+        form_id: str,
+        actor: str,
+        key: str,
+        op_type: str,
+        payload: Mapping[str, object],
+        entries: int = 0,
     ) -> str:
         """One transaction: the caller's key → the same operation on a retry (C31), a different
         payload under the same key → IDEMPOTENCY_MISMATCH, else a new `pending` operation with
-        the next `seq` of the dataset."""
+        the next `seq` of the dataset — and, for `entries` new rows, their quota reservation
+        (no room → QUOTA_EXCEEDED, and no operation either, §7)."""
         payload_hash = _payload_hash(op_type, payload)
 
         def transaction(session: ClientSession) -> str:
@@ -93,6 +110,9 @@ class MongoOperationStore:
                 },
                 session=session,
             )
+            if entries:
+                owner = self.quota.owner_of(dataset_id, session)
+                self.quota.reserve(session, owner, op_id, entries, datetime.now(UTC) + self.reservation_ttl)
             return op_id
 
         with self.client.start_session() as session:
@@ -120,17 +140,21 @@ class MongoOperationStore:
         op = self.get(op_id)
         if op.get("status") == "running" and op.get("token") == token:
             return int(str(op["attempt"]))
-        if int(str(op.get("attempt", 0))) >= self.max_attempts:
-            self.ops.update_one(
-                {"opId": op_id, "status": {"$in": ["dispatched", "running"]}},
-                {"$set": {"status": "failed", "error": {"code": "OPERATION_FAILED", "message": "too many attempts"}}},
-            )
+        # Both decisions are single CASes on the CURRENT document — never on the read above — so a
+        # delayed duplicate arriving after `committed` matches neither and changes nothing.
+        runnable: Document = {
+            "opId": op_id,
+            "$or": [{"status": "dispatched"}, {"status": "running", "token": {"$lt": token}}],
+        }
+        poisoned = self.ops.find_one_and_update(
+            {**runnable, "attempt": {"$gte": self.max_attempts}},
+            {"$set": {"status": "failed", "error": {"code": "OPERATION_FAILED", "message": "too many attempts"}}},
+        )
+        if poisoned is not None:
+            self.quota.release(op_id)  # only an operation that really just failed gives its room back
             raise EditRejected("OPERATION_FAILED", f"operation {op_id} failed after {self.max_attempts} attempts")
         moved = self.ops.find_one_and_update(
-            {
-                "opId": op_id,
-                "$or": [{"status": "dispatched"}, {"status": "running", "token": {"$lt": token}}],
-            },
+            {**runnable, "attempt": {"$lt": self.max_attempts}},
             {"$set": {"status": "running", "token": token}, "$inc": {"attempt": 1}},
             return_document=ReturnDocument.AFTER,
         )
@@ -165,7 +189,9 @@ class MongoOperationStore:
         final = not retryable or attempt >= self.max_attempts
         update: Document = {"status": "failed" if final else "dispatched", "error": dict(error)}
         self._cas(op_id, {"status": "running", "token": token, "attempt": attempt}, update, "not the running attempt")
-        if not final:
+        if final:
+            self.quota.release(op_id)
+        else:
             self.ops.update_one({"opId": op_id}, {"$addToSet": {"rolledBackAttempts": attempt}})
         return final
 
@@ -215,6 +241,7 @@ class MongoOperationStore:
             {"$set": {"status": "cancelled"}},
         )
         if moved is not None:
+            self.quota.release(op_id)
             return
         status = self.get(op_id).get("status")
         if status == "cancelled":

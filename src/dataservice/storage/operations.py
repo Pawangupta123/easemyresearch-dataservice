@@ -68,9 +68,11 @@ class PublishRequest:
 class OperationAuthority(Protocol):
     def manifest(self, dataset_id: str) -> Manifest: ...
 
-    def next_operation(self, dataset_id: str) -> QueuedOp | None:
-        """The queue's head when it is ready to run (`dispatched`); None when the queue is empty or
-        its head is not ready — nothing behind the head ever runs first."""
+    def next_operation(self, dataset_id: str, token: int) -> QueuedOp | None:
+        """The queue's head when it is ready to run for the holder of `token`: `dispatched`, or
+        `running` under an OLDER token (its writer died before finishing — taken over as the next
+        attempt). None when the queue is empty or its head is not ready — nothing behind the head
+        ever runs first."""
         ...
 
     def payload(self, op_id: str) -> Mapping[str, object]: ...

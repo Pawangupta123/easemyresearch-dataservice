@@ -22,6 +22,11 @@ from pymongo.client_session import ClientSession
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
+from prototype.node_side.errors import EditRejected
+from prototype.node_side.quota_store import MongoQuotaStore
+
+__all__ = ["Edit", "EditRejected", "EditResult", "MongoEditStore"]
+
 Document = dict[str, object]
 Target = tuple[str, str]  # (row, field)
 IDEMPOTENCY_TTL = timedelta(hours=24)  # config in Node; the reference keeps the documented default
@@ -30,12 +35,8 @@ InBase = Callable[[int, str, object], bool]
 # Runs inside the transaction once revision n is fixed (the CAS holds it): raise EditRejected to
 # abort. Undo uses it to re-check its losses at the exact revision it writes on.
 Check = Callable[[int], None]
-
-
-class EditRejected(Exception):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+# Each row's state at a revision: 'live', 'deleted' or 'absent' (the quota counts with it).
+RowStates = Callable[[int, list[str]], Mapping[str, str]]
 
 
 @dataclass(frozen=True)
@@ -79,16 +80,21 @@ class MongoEditStore:
         database: Database[Document],
         field_types: Mapping[str, str],
         unique_field: str | None,
+        quota: MongoQuotaStore,
+        row_states: RowStates,
     ) -> None:
         self.client, self.db = client, database
         self.field_types, self.unique_field = dict(field_types), unique_field
+        self.quota, self.row_states = quota, row_states
         database["dataset_patches"].create_index([("datasetId", 1), ("seq", 1)], unique=True)
         database["dataset_unique_claims"].create_index([("datasetId", 1), ("fieldId", 1), ("value", 1)], unique=True)
         database["dataset_idempotency"].create_index([("actor", 1), ("idempotencyKey", 1)], unique=True)
         database["dataset_idempotency"].create_index("expiresAt", expireAfterSeconds=0)
 
-    def create_dataset(self, dataset_id: str, base_version: int, form_id: str) -> None:
-        self.db["datasets"].insert_one({"_id": dataset_id, "formId": form_id, "currentRevision": 1, "patchSeq": 0})
+    def create_dataset(self, dataset_id: str, base_version: int, form_id: str, owner_id: str) -> None:
+        self.db["datasets"].insert_one(
+            {"_id": dataset_id, "formId": form_id, "ownerId": owner_id, "currentRevision": 1, "patchSeq": 0}
+        )
         self.db["dataset_revisions"].insert_one(
             {
                 "datasetId": dataset_id,
@@ -199,6 +205,7 @@ class MongoEditStore:
         if changes:
             db["dataset_changes"].insert_many(changes, session=session)
         self._claim_unique_values(session, dataset_id, revision, edits, seqs, in_base)
+        self.quota.charge(session, self.quota.owner_of(dataset_id, session), self._entries_delta(revision, edits))
 
         last = db["dataset_revisions"].find_one({"datasetId": dataset_id, "revision": revision}, session=session)
         if last is None:
@@ -243,6 +250,24 @@ class MongoEditStore:
             session=session,
         )
         return result
+
+    def _entries_delta(self, revision: int, edits: list[Edit]) -> int:
+        """Live rows this edit adds (+) or removes (−), from each row's state at the revision it
+        writes on and in edit order — a delete then restore in one save counts zero."""
+        rows = sorted({edit.row for edit in edits if edit.op != "set"})
+        if not rows:
+            return 0
+        state = dict(self.row_states(revision, rows))
+        delta = 0
+        for edit in edits:
+            now = state.get(edit.row, "absent")
+            if edit.op == "insert_row" and now == "absent":
+                state[edit.row], delta = "live", delta + 1
+            elif edit.op == "restore_row" and now == "deleted":
+                state[edit.row], delta = "live", delta + 1
+            elif edit.op == "delete_row" and now == "live":
+                state[edit.row], delta = "deleted", delta - 1
+        return delta
 
     def _claim_unique_values(
         self,

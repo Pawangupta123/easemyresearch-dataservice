@@ -159,7 +159,7 @@ def recover(dataset_id: str, lease: Lease, tables: WriterTables, authority: Oper
 def drain(dataset_id: str, lease: Lease, tables: WriterTables, authority: OperationAuthority) -> DrainResult:
     """Recover, then run the queue in `seq` order until its head is not ready (§4.4)."""
     result = DrainResult(recovery=recover(dataset_id, lease, tables, authority))
-    while (queued := authority.next_operation(dataset_id)) is not None:
+    while (queued := authority.next_operation(dataset_id, lease.token)) is not None:
         try:
             result.applied[queued.op_id] = run_operation(
                 dataset_id, queued.op_id, queued.op_type, lease, tables, authority

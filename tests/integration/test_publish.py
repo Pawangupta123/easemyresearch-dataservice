@@ -3,6 +3,7 @@ transaction (consistency.md §5–§6) — C15, the rebase rule, staleness, FENC
 
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import timedelta
 
 import pytest
 from deltalake import DeltaTable
@@ -29,8 +30,8 @@ class Jobs:
     def __init__(self, lake: Lake, db: Database[Document]) -> None:
         self.lake, self.db = lake, db
         self.leases = MongoLeaseStore(db, ttl_ms=60_000)
-        self.operations = MongoOperationStore(lake.client, db, max_attempts=3)
-        self.publisher = MongoPublishStore(lake.client, db, self.leases)
+        self.operations = MongoOperationStore(lake.client, db, 3, lake.quota, timedelta(minutes=10))
+        self.publisher = MongoPublishStore(lake.client, db, self.leases, lake.quota)
         self.authority = NodeAuthority(self.operations, self.publisher, self.leases)
         self.tables = WriterTables({"base": lake.base_uri})
 
@@ -40,7 +41,9 @@ class Jobs:
         return lease
 
     def submit(self, key: str = "import-1", payload: Mapping[str, object] = NEW_ROWS) -> str:
-        op_id = self.operations.submit(DATASET, FORM, "user-a", key, "append_rows", payload)
+        rows = payload.get("rows")
+        entries = len(rows) if isinstance(rows, list) else 0
+        op_id = self.operations.submit(DATASET, FORM, "user-a", key, "append_rows", payload, entries)
         self.operations.dispatch(op_id)
         return op_id
 

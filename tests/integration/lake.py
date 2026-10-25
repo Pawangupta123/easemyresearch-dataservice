@@ -14,11 +14,14 @@ from dataservice.storage.mongo_patches import MongoPatchSource
 from dataservice.storage.reader import read_rows
 from dataservice.storage.snapshot import UTC_TIMESTAMP, FieldSpec, Snapshot
 from prototype.node_side.edit_store import Edit, MongoEditStore, Target
+from prototype.node_side.quota_store import MongoQuotaStore
 
 Document = dict[str, object]
 DATASET, FORM = "ds-1", "form-1"
 FIELDS = (FieldSpec("age", "num"), FieldSpec("pid", "str"))
 ROWS = [f"r{index:02d}" for index in range(10)]
+OWNER = "owner-1"
+ENTRY_LIMIT = 1000  # roomy: quota tests set their own
 
 
 def write_base(path: Path) -> str:
@@ -45,9 +48,13 @@ class Lake:
     def __init__(self, client: MongoClient[Document], db: Database[Document], base_uri: str) -> None:
         self.client, self.db, self.base_uri = client, db, base_uri
         types = {spec.field_id: spec.value_type for spec in FIELDS}
-        self.store = MongoEditStore(client, db, types, unique_field="pid")
+        self.quota = MongoQuotaStore(client, db)
+        db["payments"].insert_one(
+            {"userId": OWNER, "entries_limit": ENTRY_LIMIT, "used_entries": len(ROWS), "reserved_entries": 0}
+        )
+        self.store = MongoEditStore(client, db, types, "pid", self.quota, self.row_states)
         self.patches = MongoPatchSource(db)
-        self.store.create_dataset(DATASET, base_version=0, form_id=FORM)
+        self.store.create_dataset(DATASET, base_version=0, form_id=FORM, owner_id=OWNER)
 
     def current_revision(self) -> int:
         dataset = self.db["datasets"].find_one({"_id": DATASET})
@@ -72,6 +79,18 @@ class Lake:
     def rows(self, revision: int | None = None, *, include_deleted: bool = False) -> dict[str, dict[str, object]]:
         table = read_rows(self.snapshot(revision), self.patches, include_deleted=include_deleted)
         return {row.pop("_rid"): row for row in table.to_pylist()}
+
+    def row_states(self, revision: int, rows: list[str]) -> Mapping[str, str]:
+        known = self.rows(revision, include_deleted=True)
+        return {
+            row: "absent" if row not in known else "deleted" if known[row]["_deleted_at"] is not None else "live"
+            for row in rows
+        }
+
+    def quota_counters(self) -> tuple[int, int]:
+        payment = self.db["payments"].find_one({"userId": OWNER})
+        assert payment is not None
+        return int(str(payment["used_entries"])), int(str(payment["reserved_entries"]))
 
     def before(self, revision: int, cells: list[Target]) -> Mapping[Target, object]:
         rows = self.rows(revision)

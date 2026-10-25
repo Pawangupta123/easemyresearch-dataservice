@@ -1,6 +1,8 @@
 """A writer dies mid-job; the next lease holder recovers (consistency.md §4.3, §5.3) — C3 on the
 full path (Delta + Node), C20 (a rolled-back attempt never counts), and a stale writer waking up."""
 
+from datetime import timedelta
+
 import pyarrow as pa
 import pytest
 from deltalake import DeltaTable
@@ -26,8 +28,9 @@ class Cluster:
     def __init__(self, lake: Lake, db: Database[Document]) -> None:
         self.lake = lake
         self.leases = MongoLeaseStore(db, ttl_ms=60_000)
-        self.operations = MongoOperationStore(lake.client, db, max_attempts=3)
-        self.authority = NodeAuthority(self.operations, MongoPublishStore(lake.client, db, self.leases), self.leases)
+        self.operations = MongoOperationStore(lake.client, db, 3, lake.quota, timedelta(minutes=10))
+        publisher = MongoPublishStore(lake.client, db, self.leases, lake.quota)
+        self.authority = NodeAuthority(self.operations, publisher, self.leases)
         self.tables = WriterTables({"base": lake.base_uri})
 
     def lease(self, owner: str) -> Lease:
@@ -40,7 +43,7 @@ class Cluster:
         return self.lease(owner)
 
     def submit(self) -> str:
-        op_id = self.operations.submit(DATASET, FORM, "user-a", "import-1", "append_rows", ROWS)
+        op_id = self.operations.submit(DATASET, FORM, "user-a", "import-1", "append_rows", ROWS, 2)
         self.operations.dispatch(op_id)
         return op_id
 
@@ -108,7 +111,7 @@ def test_a_stale_writer_that_wakes_up_can_neither_write_nor_publish(lake: Lake, 
     # Its own operation was rolled forward by B: a late retry of its publish just reads the result.
     assert cluster.authority.publish(PublishRequest(op_id, attempt, commit), writer_a) == 2
 
-    other = cluster.operations.submit(DATASET, FORM, "user-a", "import-2", "append_rows", ROWS)
+    other = cluster.operations.submit(DATASET, FORM, "user-a", "import-2", "append_rows", ROWS, 2)
     cluster.operations.dispatch(other)
     with pytest.raises(FenceError):  # Node refuses its token before any work
         run_append_rows(DATASET, other, writer_a, cluster.tables, cluster.authority)

@@ -22,15 +22,22 @@ from pymongo.database import Database
 from dataservice.storage.lease import Lease
 from dataservice.storage.operations import PublishRequest
 from prototype.node_side.documents import int_at as _int
-from prototype.node_side.edit_store import EditRejected
+from prototype.node_side.errors import EditRejected
 from prototype.node_side.lease_store import MongoLeaseStore
+from prototype.node_side.quota_store import MongoQuotaStore
 
 Document = dict[str, object]
 
 
 class MongoPublishStore:
-    def __init__(self, client: MongoClient[Document], database: Database[Document], leases: MongoLeaseStore) -> None:
-        self.client, self.db, self.leases = client, database, leases
+    def __init__(
+        self,
+        client: MongoClient[Document],
+        database: Database[Document],
+        leases: MongoLeaseStore,
+        quota: MongoQuotaStore,
+    ) -> None:
+        self.client, self.db, self.leases, self.quota = client, database, leases, quota
 
     def publish(self, request: PublishRequest, lease: Lease) -> int:
         def transaction(session: ClientSession) -> int:
@@ -88,6 +95,7 @@ class MongoPublishStore:
             },
             session=session,
         )
+        self.quota.settle(session, request.op_id, request.commit.result.rows_added)  # §6 step 6
         db["forms"].update_one({"_id": form_id}, {"$set": {"dataVersion": revision}}, session=session)
         if request.commit.result.changed_field_ids:
             db["analyses"].update_many(

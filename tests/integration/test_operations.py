@@ -9,6 +9,7 @@ from pymongo.database import Database
 
 from prototype.node_side.edit_store import EditRejected
 from prototype.node_side.operation_store import MongoOperationStore
+from prototype.node_side.quota_store import MongoQuotaStore
 from tests.integration.conftest import Document
 
 DATASET, FORM = "ds-1", "form-1"
@@ -19,7 +20,9 @@ COMMIT: Document = {"baseRevision": 1, "tableVersions": {"base": 3}}  # what a l
 @pytest.fixture
 def ops(mongo_client: MongoClient[Document], mongo_db: Database[Document]) -> MongoOperationStore:
     mongo_db["datasets"].insert_one({"_id": DATASET, "opSeq": 0})
-    return MongoOperationStore(mongo_client, mongo_db, max_attempts=3)
+    return MongoOperationStore(
+        mongo_client, mongo_db, 3, MongoQuotaStore(mongo_client, mongo_db), timedelta(minutes=10)
+    )
 
 
 def _running(ops: MongoOperationStore, token: int = 1) -> tuple[str, int]:

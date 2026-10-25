@@ -21,7 +21,7 @@ from pymongo.database import Database
 
 from dataservice.storage.lease import Lease
 from prototype.node_side.documents import int_at as _int
-from prototype.node_side.edit_store import EditRejected
+from prototype.node_side.errors import EditRejected
 from prototype.node_side.lease_store import MongoLeaseStore
 
 Document = dict[str, object]
