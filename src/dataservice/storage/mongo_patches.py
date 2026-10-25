@@ -4,6 +4,8 @@ the Data Service touches, and only to read. Node writes patches in its edit tran
 Patch document (written by Node):
     { datasetId, seq, op, target: { row, field?, scope: { kind: "main" | "followup", followUp } },
       value: { t, v } | null, opId, batchId, actor, at }
+Node writes `datasetId` and `actor` as ObjectIds (its Mongoose model); the Phase 0 reference
+store (prototype/node_side) wrote string ids, so a dataset id is matched as both.
 """
 
 from collections.abc import Mapping
@@ -81,13 +83,20 @@ def to_patch_row(document: Mapping[str, object]) -> dict[str, object]:
     )
 
 
+def dataset_key(dataset_id: str) -> object:
+    """The `datasetId` a patch of this dataset carries: Node's ObjectId (or the string id)."""
+    if ObjectId.is_valid(dataset_id) and len(dataset_id) == 24:
+        return {"$in": [ObjectId(dataset_id), dataset_id]}
+    return dataset_id
+
+
 class MongoPatchSource:
     def __init__(self, database: Database[Document]) -> None:
         self.patches_collection: Collection[Document] = database["dataset_patches"]
 
     def patches(self, dataset_id: str, from_seq: int, to_seq: int) -> pa.Table:
         cursor = self.patches_collection.find(
-            {"datasetId": dataset_id, "seq": {"$gt": from_seq, "$lte": to_seq}},
+            {"datasetId": dataset_key(dataset_id), "seq": {"$gt": from_seq, "$lte": to_seq}},
             {"_id": 0, "seq": 1, "op": 1, "target": 1, "value": 1, "at": 1, "actor": 1},
         ).sort("seq", 1)
         return pa.Table.from_pylist([to_patch_row(document) for document in cursor], schema=PATCH_SCHEMA)

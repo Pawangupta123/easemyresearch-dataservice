@@ -71,3 +71,13 @@ def test_a_patch_with_a_missing_or_inconsistent_scope_is_refused() -> None:
     ):
         with pytest.raises(ValueError):
             to_patch_row(_scoped(scope))
+
+
+def test_a_dataset_is_matched_by_nodes_objectid_and_the_reference_stores_string() -> None:
+    from bson import ObjectId
+
+    from dataservice.storage.mongo_patches import dataset_key
+
+    hex_id = "6a1f00000000000000000011"
+    assert dataset_key(hex_id) == {"$in": [ObjectId(hex_id), hex_id]}
+    assert dataset_key("ds-1") == "ds-1"

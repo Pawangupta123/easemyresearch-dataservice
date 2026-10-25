@@ -109,3 +109,18 @@ def test_count_and_cells_read_see_the_same_revision(client: TestClient) -> None:
     later = {**MANIFEST, "patches": {"fromSeq": 0, "toSeq": 3}}
     cells = _post(client, "cells:read", {"manifest": later, "targets": [{"row": ROWS[1], "field": "seen"}]})
     assert cells["cells"] == [{"target": {"row": ROWS[1], "field": "seen"}, "value": "2026-03-09"}]
+
+
+def test_patches_node_writes_with_objectids_are_read(client: TestClient, mongo_db: Database[Document]) -> None:
+    from bson import ObjectId
+
+    mongo_db["dataset_patches"].insert_one(
+        {
+            **_patch(4, "set", ROWS[3], {"t": "num", "v": 99.5}, "age"),
+            "datasetId": ObjectId(DATASET),  # as Node's Mongoose model writes it
+            "actor": ObjectId("6a1f000000000000000000e1"),
+        }
+    )
+    later = {**MANIFEST, "patches": {"fromSeq": 0, "toSeq": 4}}
+    cells = _post(client, "cells:read", {"manifest": later, "targets": [{"row": ROWS[3], "field": "age"}]})
+    assert cells["cells"] == [{"target": {"row": ROWS[3], "field": "age"}, "value": 99.5}]
