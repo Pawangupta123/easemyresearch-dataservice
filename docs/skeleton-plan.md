@@ -8,6 +8,18 @@ Progress:
   - Token: Python 47d0415, Node fb4ccb10.
   - Gateway: Node fb4ccb10.
   - A Node-signed token was verified by Python, and refused once expired.
+- Step 2: done.
+  - Reader: row meta, newest first, given row ids (`efb32cd`).
+  - Endpoints rows:query / rows:count / cells:read (`17efab4`).
+  - Fenced create + seed probe, 1k and 1M rows (`25e224a`).
+  - Changes from the step text:
+    - The seed writes only Delta plus `seed.json`; Node seeds Mongo (M16).
+    - The manifest requires a base for now: a Data Service dataset gets its base from its first import.
+    - Filters and sort are not taken yet; unknown keys are refused.
+  - Moved on:
+    - The exported contract and its fixtures go to the start of step 3, where Node's Zod reads them.
+    - `datasetId` as an ObjectId goes to the first test of step 4 (H2).
+  - Timings: STATUS §1 "Skeleton query service".
 
 ## Summary
 

@@ -1,6 +1,6 @@
 # Status — Phase 0
 
-**As of:** 2026-10-25 · branch `feat/lease-fence` at `f48f84e` · nothing in production
+**As of:** 2026-10-25 · branch `exp/skeleton` at `25e224a` (off `feat/lease-fence`, local only, never pushed) · nothing in production
 
 Phase 0 = scaffold + consistency prototype ([design/implementation-plan.md](design/implementation-plan.md),
 scenarios in [design/consistency.md §13](design/consistency.md#13-phase-0-prototype--must-pass-before-phase-1)).
@@ -11,8 +11,9 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 
 ## 0. Resume here (read this first after a break or a context compaction)
 
-**Branch:** `feat/lease-fence` (dataservice) · last code commit `f48f84e` · 229 tests (143 unit,
-86 integration). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
+**Branch:** `exp/skeleton` (dataservice, local only — an experiment: kept if the prototype works,
+dropped if not) · last code commit `25e224a` · 287 tests (199 unit, 88 integration). Node's side:
+backend branch `exp/dataservice-skeleton` (off `feat/datastore-phase1`, local only). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
 `2c9e864c` = decision D14, **not pushed**); `docs/design/` here is an identical copy
 (synced to `2c9e864c`) — change both together.
 
@@ -25,7 +26,21 @@ service for now; **D14** screening and the mini table (table fields) are legacy-
 keep them, new forms never get them. **Follow-ups are needed** for new forms, exactly as Node does
 them today (a visit row exists once submitted; the schedule is worked out at read).
 
-**Just done (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
+**Walking skeleton (2026-10-25, user-approved; plan: [skeleton-plan.md](skeleton-plan.md), whose
+"Critic corrections" override its step text).** Goal: a Data Service form end to end — create
+(import) → grid → one cell edit. Four milestones, one at a time, a demo after each; no new scope
+without the user's nod. Allow-listed users only, 10 MB xlsx, local Docker Mongo (never Atlas,
+never the backend's `.env.test` DB).
+- Step 1 done: Node's scoped dataset token, verified here (`47d0415`; Node `fb4ccb10`).
+- Step 2 done: the reader gives the grid's row shape — `_created_by` / `_created_at` /
+  `_updated_at`, newest first, given row ids (`efb32cd`); `POST /v1/datasets/{id}/rows:query`,
+  `rows:count`, `cells:read` (`17efab4`); fenced `create` + `probes/seed_skeleton_dataset.py`
+  (`25e224a`). Not yet: the exported contract + JSON fixtures for Node's Zod (first thing of
+  step 3); `datasetId` as ObjectId in `dataset_patches` (critic H2, first test of step 4).
+- **Next: step 3** (Node): seed the Mongo side from `seed.json`, then the grid through
+  `DataServiceRowReader`.
+
+**Earlier (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
 hardened after a 55-agent adversarial review (every finding fixed with a test; 12,000 random
 cases old-vs-new reader: 0 differences), benchmarked on 10M synthetic rows (§1 Performance).
 
@@ -79,6 +94,10 @@ mangle backslashes on this box).
 | **Entry quota** (spec of Node's side): imports reserve with their operation (no room → `QUOTA_EXCEEDED`, no operation), publish settles (re-validated if released), final failure / cancel release, the sweeper releases only for finished or vanished operations (C7), the heartbeat renews every unfinished reservation; small edits charge inserts / restores and credit deletes; abandoned `running` heads are taken over | `prototype/node_side/quota_store.py`, `operation_store.py`, `authority.py` | `e03afa2` |
 | **Old versions**: fenced `vacuum` (token on VACUUM START / END, keeps the files of the versions Node reports pinned, never below the table's own file retention); `retention_configuration(days)` for every new table (log + removed files kept `DELTA_RETENTION_DAYS`, default 60); Settings refuse a retention not longer than `RESTORE_WINDOW_DAYS` (C14, C16) | `storage/fenced_commit.py`, `config/settings.py` | `40f4f95` |
 | **Follow-up visits** (Node's behaviour): patches carry their visit (0 = main, N = follow-up N; a table-field scope is refused, D14); the main reader lays only main-visit patches over base; `query_visits` / `merge_visits` read the `followups` table (`_rid`, `_follow_up`, fields) + visit patches for live rows only; delete / restore of a single visit refused; compaction refuses while visit patches would be dropped | `storage/reader/visits.py`, `storage/snapshot.py`, `storage/mongo_patches.py` | `d37e5a8` |
+| **Scoped dataset token** (api.md §2): HS256, ≤ 60 s, one dataset + scope + row scope (all or the caller's own), 30 s skew; `require_dataset_token(*scopes)` on every `/v1/datasets/{id}/…` route; no public docs (`/docs`, `/openapi.json` off) | `common/utils/dataset_token.py`, `common/auth.py` | `47d0415` |
+| **Grid row shape in the reader**: `Query{meta, row_order, rids}` — creator / created / last change (an inserted row's from its insert patch's `actor` + `at`; `_updated_at` moved by any patch of the row, any visit), newest first by row id, a read of given rows; compaction carries the meta columns | `storage/reader/`, `storage/compaction.py`, `storage/mongo_patches.py` | `efb32cd` |
+| **Query service over HTTP**: `rows:query`, `rows:count`, `cells:read` (api.md §2.1) — camelCase DTOs that refuse unknown keys, table URIs only from `LAKE_ROOT` + the dataset id, a row-scoped token reads only its own rows' cells and can't list or count | `modules/datasets/` | `17efab4` |
+| Fenced `create` (a new table: txn token + retention, never over an existing one); seed probe for the skeleton (a CRF of every value type, Node-style ids, `seed.json` for Node's Mongo seed, `--bench`) | `storage/fenced_commit.py`, `probes/seed_skeleton_dataset.py` | `25e224a` |
 | Library-facts probe (delta-rs / DuckDB), run in CI and on push | `probes/delta_api_probe.py` | `a15a439` |
 
 ### Tests (2026-10-25, `f48f84e`, all passing with the local Mongo up)
@@ -113,6 +132,16 @@ is **mutation-tested** (the reader: 26 of 26 mutants killed).
 | C12 (data side: the same field in visit 1, visit 2 and the main visit are three cells) | `test_reader_visits.py` | in memory + local Delta |
 | C25, C26 (Delta side: a base rewrite landing mid-compaction wins, the compaction gets `ConflictError`; a rewrite that folded a patch is read with `fromSeq` at its watermark) | `test_compaction_stream.py` | local filesystem Delta |
 | C21 (the reader's side: each revision read with its own schema; a schema that does not match its base is refused) | `test_reader_delta.py` | local filesystem Delta |
+
+### Skeleton query service (2026-10-25, `probes/seed_skeleton_dataset.py --bench`, local disk, no patches, best of 3)
+
+| Rows (8 fields) | Parquet | Seed write | Page of 50, newest first, with meta | Count |
+|---|---|---|---|---|
+| 1,000 | 56 KB | < 0.1 s | 44 ms | 21 ms |
+| 1,000,000 | 29 MB | 1.1 s | 278 ms | 14 ms |
+
+The newest-first page sorts every row id (a top-N over 1M strings). Open: skip row groups by
+their `_rid` min/max so a first page reads only the newest file(s).
 
 ### Performance (2026-10-25, synthetic 10M rows × 50 fields = 1.1 GB Parquet, 22-core dev box)
 
