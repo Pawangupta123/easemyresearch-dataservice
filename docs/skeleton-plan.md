@@ -1,6 +1,13 @@
 # Walking skeleton plan (draft, 2026-10-25)
 
-Status: **draft, waiting for the user's yes** on the four decisions in the chat (allow-list only, small FE change, 10 MB cap, local Docker Mongo). The completeness critic did not run (session limit) — run it before building.
+Status: **approved 2026-10-25** (allow-list only, small FE change, 10 MB cap, local Docker Mongo on 27018, never Atlas, never the .env.test DB). The critic ran; its 31 corrections are in [Critic corrections](#critic-corrections) and override the step text below where they differ.
+
+Progress:
+- Step 0: done (branches exp/skeleton and exp/dataservice-skeleton, local only).
+- Step 1: done, except the contract DTOs and fixtures, which move into step 2 (they belong with the first endpoints).
+  - Token: Python 47d0415, Node fb4ccb10.
+  - Gateway: Node fb4ccb10.
+  - A Node-signed token was verified by Python, and refused once expired.
 
 ## Summary
 
@@ -45,6 +52,82 @@ Scores out of 10, on (a) proves the risky parts / (b) smallest work / (c) no thr
 4. Only then come the real write path (lease/operation/publish port), detect/validate/ingest behind production-shaped /datasets routes in the import module, and the FE wiring.
 
 Things that stay out of this run are named one by one in out_of_scope. Code: Node in src/v2/common/datastore/dataservice/, and Python in new modules/datasets and modules/ingest plus clients/node_authority.py. Both on new local branches that are never pushed.
+
+## Critic corrections
+
+The critic checked this plan against both codebases on 2026-10-25. Each correction is listed under the step it changes. Numbers are the critic's (H = high, M = medium, L = low).
+
+**Step 1 (contract, env)**
+- H2: pin the BSON types of `dataset_patches`.
+  - `datasetId` is an ObjectId; Python converts it (mongo_patches.py queries a str today).
+  - Row, field and option ids are 24-hex strings.
+  - `num` is a double; a date is a midnight-UTC BSON Date.
+  - One shared patch-document fixture.
+- M19: env names in both .env.example files.
+  - Python `SERVICE_TOKEN_SECRET` = Node `DATA_SERVICE_TOKEN_SECRET`.
+  - Python still needs Node's base URL (PORT defaults to 5001), the callback secret, and the import bucket and credentials (Python uses AWS_*, Node uses AWS_S3_*).
+- M21: copy the contract fixtures into Node's tests/fixtures, with a sync check. Node hooks cannot read a sibling repo.
+- L29: /v1/jobs carries datasetId in the body, so it needs a body-based token check, not the path one.
+
+**Step 2 (query endpoints, seed)**
+- M16: Python seeds only Delta. A Node script seeds the Mongo docs.
+  - The form needs createdBy, status, deletedAt, title, fields with an ObjectId `_id`, options with fieldId, mainForm and entryCount.
+  - Otherwise the row mapper drops every cell.
+- M17: auth needs a seeded User, Role, an active Session, and a successful Payment with a plan. Or log in for real against the docker DB.
+- M18: local Mongo URL.
+  - Node: `mongodb://localhost:27018?replicaSet=rs0&directConnection=true` (no slash) plus DB_NAME. Python's db name must be the same.
+  - Set a separate REDIS_DB, so BullMQ jobs do not reach the Atlas-backed dev workers.
+- L26: the seed carries `_created_by`, `_created_at` and `_updated_at`. Compaction must keep them (`_updated_at` from the folded patches).
+- M9 (part): ManifestDto carries `tables.followups` and the visit fields now, not a literal null.
+
+**Step 3 (grid read)**
+- H1: take the storage branch from `req.formAccess.storage`, passed through the controller context. `findFormWithStructure` does not select `storage`/`datasetId`; add them too. Test through the real repository select.
+- M13: cursor.
+  - Extend the decoder to carry `revision` and `afterRid`.
+  - rows:query gets `afterRid` (keyset), not only an offset.
+  - Offset mode is not pinned to a revision; document that.
+- L24: the read token's rowScope is 'all' for every viewer. Creator scope applies only to edits.
+- L25: for an unfiltered grid, total = manifest rowCount; no rows:count call.
+- M15: the FE cannot see `storage`. Add it as a new response field (formMetadata, get-form and list selects) and report the FE impact.
+- L31: the reader already supports filters and sort, so cutting them is a choice. Port them here if cheap.
+
+**Step 4 (cell edit)**
+- H2: the first test is the cross-repo "Node writes a patch, rows:query reads it".
+- M8: `validateOnly` dry runs read `records`. Validate through cells:read without writing, or refuse.
+- M9: refuse bulk-edit entries that carry a followUpNumber in the skeleton, so a visit edit never overwrites the main cell.
+- M10: skip `revisionBulkCaptureService.captureMany` and do not write RevisionBatch (batches map to `dataset_changes.batchId`).
+- M11: bump `Form.dataVersion` with `$inc`/`$max`, never set it to the revision number.
+- M14: add `Idempotency-Key` to the CORS allowed headers before the FE sends it.
+- M20: Node e2e runs on a separate opt-in vitest config and env file for the docker DB (name contains "test"), outside pre-push `test:e2e`. Never .env.test, which points at Atlas.
+- M22: reusing bulk-edit validation needs entry-shaped before-values from cells:read and a form with followUps. Derived output (`applyDerived`) is refused or stripped.
+
+**Step 5 (guards)**
+- H3: form-module routes read `records` to decide what is safe, and would see a Data Service form as empty.
+  - form-update: `existsByFormId`, `findUsedOptionIds`, `migrateAllowedTypeChanges`, column archives.
+  - form-field-patch: `countOptionUsage`.
+  - Also unique-identifier and convert-to-manual.
+  - These routes change form.fields without touching dataset_schemas.
+  - Base the guard list on the static inventory (node-phase1-audit.md §2, 107 call sites in 43 files), not only on a log census. It includes doc-extract commit, AI record tools, doc-build, graphs and reports, and the Python analysis service, which reads `records` directly.
+- H4: add-row, columns and the per-row revision routes have no checkFormPermission, so `requireMongoStorage` would return 500 there. Guard them in the service with `findFormStorage`. toggle-hidden stays open (display-only).
+- M12: specify each DataServiceGlobalCounts method and test it. `countActiveRows(since)` cannot come from `datasets.rowCount`.
+- L28: FeatureNotAvailableError is 422, not 400.
+
+**Step 6 (lease, operations, publish)**
+- H5: mount raw-body capture for /api/v2/internal before `express.json` (HMAC over Python's bytes; mongoSanitize changes bodies), and exempt that path from the 100/min rate limiter.
+- M23: the dataset-drain job (jobId = datasetId) needs `removeOnComplete` and `removeOnFail` set to true, or a kept job swallows the next wake-up.
+
+**Step 7 (detect, validate, ingest)**
+- H6: POST /datasets reuses `uploadImportReferenceSchema` and the upload service's checks:
+  - the `imports/<userId>/` prefix;
+  - MIME type;
+  - HEAD size of 10 MB;
+  - `AWS_S3_IMPORT_BUCKET`.
+  - Pass bucket and key to Python.
+- H7: check the form quota before creating the form, or create it at confirm as import-finalize does. An entry-capacity check on xlsx confirm is new behaviour, so mark it so.
+- L27: say which legacy import endpoints the modal needs (preview-data, cancel, import-status).
+
+**Plan status**
+- L30: step 0 is done and STATUS §0 points at exp/skeleton (fixed by this edit).
 
 ## Steps
 
