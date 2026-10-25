@@ -87,8 +87,9 @@ def append(table: DeltaTable, data: pa.Table, context: CommitContext) -> None:
     write_deltalake(table, data, mode="append", commit_properties=context.commit_properties())
 
 
-def overwrite(table: DeltaTable, data: pa.Table, context: CommitContext) -> None:
-    """Replace the table's data (a base rewrite: compaction, transform) — fenced, never rebased."""
+def overwrite(table: DeltaTable, data: pa.Table | pa.RecordBatchReader, context: CommitContext) -> None:
+    """Replace the table's data (a base rewrite: compaction, transform) — fenced, never rebased.
+    A stream is written batch by batch, so a GB-scale rewrite never sits in memory."""
     check_fence(table, context.token)
     write_deltalake(table, data, mode="overwrite", commit_properties=context.commit_properties())
 

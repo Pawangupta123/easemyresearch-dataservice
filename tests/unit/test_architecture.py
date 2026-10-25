@@ -33,6 +33,7 @@ READER = SRC / "storage" / "reader.py"
 # applies the revision's patches — a raw read would show values the user already changed.
 DATA_READ_CALL = re.compile(
     r"QueryBuilder\(|delta_scan|\.to_pyarrow|\.to_pandas\(|\.to_polars\(|scan_delta|read_delta|\.load_as_version\("
+    r"|read_parquet|\.file_uris\("
 )
 
 

@@ -7,7 +7,7 @@ import pyarrow as pa
 import pytest
 from deltalake import write_deltalake
 
-from dataservice.storage.reader import merge, read_rows
+from dataservice.storage.reader import Query, merge, read_rows
 from dataservice.storage.snapshot import PATCH_SCHEMA, FieldSpec, Snapshot
 
 FIELDS = (FieldSpec("age", "num"), FieldSpec("name", "str"), FieldSpec("visit", "date"), FieldSpec("symptoms", "opts"))
@@ -88,7 +88,7 @@ def test_delete_and_restore_follow_the_latest_row_patch() -> None:
         _patch(4, "restore_row", "r2"),
     )
     assert set(_rows(merge(BASE, patches, _snapshot()))) == {"r2", "r3"}
-    with_deleted = merge(BASE, patches, _snapshot(), include_deleted=True)
+    with_deleted = merge(BASE, patches, _snapshot(), Query(include_deleted=True))
     assert set(_rows(with_deleted)) == {"r1", "r2", "r3"}
 
 
@@ -129,7 +129,7 @@ def test_with_deleted_rows_each_row_carries_its_deleted_time() -> None:
         _patch(2, "restore_row", "r3") | {"at": datetime(2026, 10, 21, tzinfo=UTC)},
         _patch(3, "insert_row", "r9"),
     )
-    rows = _rows(merge(BASE, patches, _snapshot(), include_deleted=True))
+    rows = _rows(merge(BASE, patches, _snapshot(), Query(include_deleted=True)))
     assert rows["r1"]["_deleted_at"] == deleted_at  # the delete patch's time
     assert rows["r3"]["_deleted_at"] is None  # restored from the base's trash
     assert rows["r2"]["_deleted_at"] is None and rows["r9"]["_deleted_at"] is None
