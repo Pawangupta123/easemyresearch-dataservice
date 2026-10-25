@@ -14,6 +14,7 @@ dependencies = [
     "granian>=2.8.5",
     "pyarrow>=26.0.0",
     "pydantic-settings>=2.16.1",
+    "pyjwt>=2.15.1",
     "pymongo>=4.19.0",
     "structlog>=26.1.0",
     "tzdata>=2026.5",

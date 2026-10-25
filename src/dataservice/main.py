@@ -19,9 +19,12 @@ def create_app() -> FastAPI:
     configure(ReaderLimits(settings.duckdb_threads, settings.duckdb_memory_limit, settings.duckdb_temp_directory))
     # Every route declares a Pydantic return type: FastAPI then serialises straight to JSON
     # bytes in Pydantic's Rust core — faster than a custom (orjson) response class.
-    app = FastAPI(title="EaseMyResearch Data Service", dependencies=[Depends(require_service_token)])
+    # Each router carries its own auth — /health the scaffold token, /v1/datasets/... the scoped
+    # dataset token (common/auth.py); tests/unit/test_auth_routes.py fails on a route with none.
+    # No public docs: the contract is exported by scripts/export_contract.py, not served.
+    app = FastAPI(title="EaseMyResearch Data Service", docs_url=None, redoc_url=None, openapi_url=None)
     register_error_handlers(app)
-    app.include_router(health_router)
+    app.include_router(health_router, dependencies=[Depends(require_service_token)])
     return app
 
 
