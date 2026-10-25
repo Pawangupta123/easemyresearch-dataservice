@@ -1,6 +1,6 @@
 # Data Service — Consistency Protocol (v3)
 
-**Status:** Proposed (v3.4, 2026-10-25: derived fields of new forms computed at read by the one reader — an edit does no derived work, a derived-field change is a schema-only revision (PRD D12); v3.3, 2026-10-24: hybrid edits — small edits as Mongo patches in one Node transaction, one reader, compaction and patch retention, change log in Mongo, unique-identifier claims; v3.2: token CAS, attempt-guarded transitions, watermark + rebase rules, mandatory schema snapshots, held-op freeze, caller idempotency, cancel vs publish, dataset restore invariants) · must be prototyped in Phase 0 before any other build
+**Status:** Proposed (v3.5, 2026-10-25: table fields and screening are legacy-only (PRD D14) — no `table` target and no `table_<fieldId>` child table, so a dataset's Delta tables are base and `followups`; facts corrected: the reader uses DuckDB's core `read_parquet`, moto stalls only delta-rs reads; v3.4, 2026-10-25: derived fields of new forms computed at read by the one reader — an edit does no derived work, a derived-field change is a schema-only revision (PRD D12); v3.3, 2026-10-24: hybrid edits — small edits as Mongo patches in one Node transaction, one reader, compaction and patch retention, change log in Mongo, unique-identifier claims; v3.2: token CAS, attempt-guarded transitions, watermark + rebase rules, mandatory schema snapshots, held-op freeze, caller idempotency, cancel vs publish, dataset restore invariants) · must be prototyped in Phase 0 before any other build
 **Last updated:** 2026-10-25
 **Back to:** [tech-design.md](tech-design.md) · [data-model.md](data-model.md) · [api.md](api.md)
 
@@ -45,11 +45,14 @@ Facts the protocol relies on (checked against delta-rs and DuckDB sources/docs, 
   mutation test).
 - A `RESTORE` drops custom table properties set after its target version, so the fence lives
   in the `txn` action, never in the `emr.fence` property (2026-10-24).
-- moto's S3 server cannot serve delta-rs Parquet **data** reads (requests stall), while writes
-  and log reads work: integration tests on moto assert on the Delta log; read-path tests use
-  the local filesystem or real S3 (2026-10-24).
-- DuckDB reads a Delta table at a version with `delta_scan(path, version => n)` (duckdb-delta
-  ≥ the version pinned in Phase 0) or `ATTACH … AT (VERSION => n)`.
+- moto's S3 server cannot serve delta-rs (DataFusion) Parquet **data** reads (requests stall),
+  while delta-rs writes and log reads work, and DuckDB reads the Parquet files from moto fine:
+  integration tests on moto assert on the Delta log for delta-rs, and the reader is tested on
+  moto (2026-10-24, 2026-10-25).
+- The reader reads a Delta table at a version with DuckDB's **core `read_parquet`** over the
+  file list of that version from the Delta log (delta-rs `DeltaTable(uri, version=n)`), with
+  projection and filter pushdown — not the DuckDB delta extension (`delta_scan` / `ATTACH`)
+  and not DataFusion (2026-10-25).
 - `delta.logRetentionDuration` (default 30 days) deletes old log entries at checkpoints; a
   version whose log is gone cannot be read even if its Parquet files remain.
 - MongoDB multi-document transactions need a replica set (Atlas is one) and have a lifetime
@@ -82,8 +85,7 @@ dataset_revisions {
   datasetId, revision: n,
   tables: {                                         // Delta tables, each at an exact version
     base:              { version },
-    followups:         { version } | null,
-    'table_<fieldId>': { version } …
+    followups:         { version } | null           // no table_<fieldId>: table fields are legacy-only (PRD D14)
   },
   patches: { fromSeq, toSeq },                      // Mongo dataset_patches with fromSeq < seq ≤ toSeq
   maxRowId,                                         // _row_id high-water mark (§10)
@@ -196,8 +198,8 @@ the wrapper checks `transaction_version("emr-writer") ≤ token`; a higher value
 ### 4.3 Acquire = fence every table, then reconcile
 
 1. **Fence.** Write a data-free fenced commit (`alter.set_table_properties({"emr.fence": token},
-   raise_if_not_exists=False)`) to **every** Delta table of the dataset — base, followups,
-   each `table_<fieldId>`. The fence is the commit's `txn`, not the property (a `RESTORE` drops
+   raise_if_not_exists=False)`) to **every** Delta table of the dataset — base and, when it
+   exists, followups. The fence is the commit's `txn`, not the property (a `RESTORE` drops
    the property but keeps the txn, Facts). A stale writer's commit is now either before the
    fence (visible to step 2) or races it and loses (`ConcurrentTransaction`, then its fresh
    check sees the higher token and aborts).
@@ -536,7 +538,7 @@ Restoring to revision r is a separate, explicit, audited **Delta job** (a base r
 §4.5 applies, with a whole-dataset freeze). Invariants:
 
 - It publishes a **new** revision n+1 — history is never rewound. Each Delta table (base,
-  followups, `table_<fieldId>`) gets a fenced `RESTORE` to r's version, i.e. a new commit, and
+  followups) gets a fenced `RESTORE` to r's version, i.e. a new commit, and
   r's patches (`r.fromSeq < seq ≤ r.toSeq`) are folded into it exactly as compaction folds
   them (§15.2). n+1 lists those new versions with `patches = { fromSeq: n.toSeq, toSeq: n.toSeq }`,
   so no patch written after r applies on top.
@@ -558,13 +560,14 @@ Restoring to revision r is a separate, explicit, audited **Delta job** (a base r
 ```json
 { "row": "<_rid>", "field": "<fieldId>",
   "scope": { "kind": "main",     "followUp": 0 }
-         | { "kind": "table",    "parentField": "<fieldId>", "rowIndex": 2, "followUp": 0 }
          | { "kind": "followup", "followUp": 3 } }
 ```
 
-`followUp = 0` is the main visit, so a table field in visit 1 and visit 2 are different
-targets — today's `parentFieldId + rowIndex + followUpNumber`. The same target addresses a
-`dataset_patches` document, a `dataset_changes` entry and a Delta cell.
+`followUp = 0` is the main visit, so the same field in visit 1 and visit 2 is two different
+targets — today's `fieldId + followUpNumber`. The same target addresses a `dataset_patches`
+document, a `dataset_changes` entry and a Delta cell. There is no `table` scope: table fields
+(today's `parentFieldId + rowIndex` sub-rows) are legacy-only and never exist on a
+`dataservice` form (PRD D14).
 
 Values are typed. In Delta they are stored in **typed nullable columns** (Parquet has no union
 type); in `dataset_patches` and `dataset_changes` the value is `{ t, v }`, with `v` of the
@@ -652,7 +655,7 @@ with the same rows and values (§15.2), so a session pinned before it stays corr
 | C9 | Owner vs collaborator on the same filter; page 1 vs page 2 | no cache leakage; pages correct |
 | C10 | Batches A and B on different rows; compaction; undo A | B intact, A reverted |
 | C11 | Batches A and B on the same cell; undo A | conflict reported; consent required |
-| C12 | Table field edited in follow-up 1 and follow-up 2 | distinct targets; undo of one leaves the other |
+| C12 | The same field edited in follow-up 1 and follow-up 2 (table fields are legacy-only, PRD D14 — no table target to test) | distinct targets; undo of one leaves the other |
 | C13 | Pagination across a concurrent write | pages consistent with the pinned revision |
 | C14 | VACUUM while a job is pinned to an old revision | job completes; files intact |
 | C15 | Publish response lost, writer retries | idempotent 200; no rollback |
@@ -804,7 +807,7 @@ revision, result, expiresAt }` with a unique index on `(actor, idempotencyKey)`:
 dataset_patches {
   datasetId, seq,                                   // seq from datasets.patchSeq ($inc)
   target: { row: <_rid>, field: <fieldId>,          // field absent for row ops
-            scope: { kind: 'main' | 'table' | 'followup', parentField?, rowIndex?, followUp } },
+            scope: { kind: 'main' | 'followup', followUp } },   // no 'table' (PRD D14)
   op: 'set' | 'insert_row' | 'delete_row' | 'restore_row',
   value: { t: 'null' | 'str' | 'num' | 'date' | 'opts' | 'files', v },   // set only (§9)
   opId, batchId,                                    // batchId ≡ mutationId
@@ -831,7 +834,7 @@ Service. For revision n it reads the Delta tables at `n.tables` versions and the
 2. **Row state** = the latest `delete_row` / `restore_row` patch of the row by `seq`, else the
    row's own `_deleted_at`; deleted rows are dropped unless the trash is being read.
 3. **Cell** = the latest `set` patch of the target by `seq` (`t: 'null'` clears it), else the
-   base value. Child tables (`table_<fieldId>`, `followups`) merge the same way, by full target.
+   base value. The `followups` child table merges the same way, by full target.
 4. **Derived columns** = the DuckDB expressions compiled from the derived specs of the
    revision's `schemaRef`, evaluated over the merged values of each table (PRD D12). They are
    computed here for every consumer and never stored, patched or folded by compaction.

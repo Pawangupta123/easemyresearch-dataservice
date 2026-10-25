@@ -34,7 +34,9 @@ Service's `:validate` (types, deduped and ordered options, correction map), pers
 ([api §2.5](api.md#25-import-validation)). A derived field keeps its spec and metadata here —
 source field ids, dedupe keys, the dependency graph used for staleness — but its values are
 never stored: the one reader computes them at read
-([tech design §7.2](tech-design.md#72-derived-fields-new-forms)).
+([tech design §7.2](tech-design.md#72-derived-fields-new-forms)). A `dataservice` form never
+holds a `table` field or `screening` criteria — both are legacy-only, refused by the storage
+guard (PRD D14).
 
 ### `payments` — quota counters
 
@@ -82,7 +84,7 @@ by Node's edit transaction, read (read-only) by the Data Service's one reader.
 |---|---|---|
 | `datasetId` | ObjectId | |
 | `seq` | number | From `datasets.patchSeq`; a revision reads `patches.fromSeq < seq ≤ patches.toSeq` |
-| `target` | `{ row: _rid, field?, scope: { kind: 'main' \| 'table' \| 'followup', parentField?, rowIndex?, followUp } }` | Main, table-row and follow-up cells; `field` absent for row ops ([consistency §9](consistency.md#9-cell-addressing-and-values)) |
+| `target` | `{ row: _rid, field?, scope: { kind: 'main' \| 'followup', followUp } }` | Main and follow-up cells; `field` absent for row ops. No `table` scope: table fields are legacy-only, never on a `dataservice` form (PRD D14; [consistency §9](consistency.md#9-cell-addressing-and-values)) |
 | `op` | `'set' \| 'insert_row' \| 'delete_row' \| 'restore_row'` | |
 | `value` | `{ t: 'null' \| 'str' \| 'num' \| 'date' \| 'opts' \| 'files', v }` | `set` only |
 | `opId`, `batchId` | string | `batchId ≡` today's `mutationId` |
@@ -133,7 +135,7 @@ together with the `datasets.currentRevision` move.
 |---|---|---|
 | `datasetId` | ObjectId | |
 | `revision` | number | Monotonic per dataset; n+1 only on top of n |
-| `tables` | `{ base: {version}, followups: {version} \| null, ['table_<fieldId>']: {version} }` | Exact Delta version of every table |
+| `tables` | `{ base: {version}, followups: {version} \| null }` | Exact Delta version of every table |
 | `patches` | `{ fromSeq, toSeq }` | The revision's `dataset_patches`: `fromSeq < seq ≤ toSeq`; `fromSeq` = already folded into the Delta tables |
 | `maxRowId` | number | `_row_id` high-water mark ([consistency §10](consistency.md#10-allocation)) |
 | `schemaRef` | ObjectId | → `dataset_schemas`; mandatory post-change snapshot the data matches; never deleted while a retained revision references it |
@@ -284,12 +286,13 @@ are filtered most, decided per dataset by usage later.
 
 | Table | Key | Holds |
 |---|---|---|
-| `table_<fieldId>/` | `(_row_id, parentFieldId, rowIndex, followUp)` | Sub-rows of a table field per visit (`followUp = 0` main visit); columns `f_<childFieldId>` |
-| `followups/` | `(_row_id, followUp)` | One row per follow-up visit: `followUpStatus` (`pending \| completed`), `submitted_at`, `screening_excluded` flag, `f_<fieldId>` columns |
+| `followups/` | `(_row_id, followUp)` | One row per follow-up visit: `followUpStatus` (`pending \| completed`), `submitted_at`, `f_<fieldId>` columns |
 
-Created only for forms that have table fields / follow-ups (`followups: null` in the manifest
-otherwise). Imported flat files have neither. Patches address their cells by the full target
-(`scope.kind` `table` / `followup`) and the reader merges them the same way as base cells.
+Created only for forms that have follow-ups (`followups: null` in the manifest otherwise).
+Imported flat files have none. Patches address its cells by the full target
+(`scope.kind: 'followup'`) and the reader merges them the same way as base cells. There is no
+child table per table field and no screening column: table fields and screening are
+legacy-only and never exist on a `dataservice` form (PRD D14).
 
 ### Job change files `changes/<jobId>.parquet`
 
@@ -300,5 +303,6 @@ Not a Delta table: the before/after values of one Delta job that changed many ce
 ## 4. What stays in MongoDB for `storage = 'mongo'` forms
 
 Everything as today (`records`, revisions, etc.), served by today's Node code — import,
-derived-field evaluators, Mongo grid filters, type conversion — unchanged and frozen (PRD D11).
-Nothing in this document applies to them.
+derived-field evaluators, Mongo grid filters, type conversion — unchanged and frozen (PRD D11),
+including the legacy-only features: table fields (`parentFieldId` + `rowIndex` entries) and
+screening (`ScreeningAttempt`) (PRD D14). Nothing in this document applies to them.

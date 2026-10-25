@@ -11,17 +11,19 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 
 ## 0. Resume here (read this first after a break or a context compaction)
 
-**Branch:** `feat/lease-fence` (dataservice) · last code commit `f48f84e` · 214 tests (128 unit,
+**Branch:** `feat/lease-fence` (dataservice) · last code commit `f48f84e` · 229 tests (143 unit,
 86 integration). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
-`22a20996` = decisions D11–D13, **not pushed**); `docs/design/` here is an identical copy
-(synced `170e2bb`) — change both together.
+`2c9e864c` = decision D14, **not pushed**); `docs/design/` here is an identical copy
+(synced to `2c9e864c`) — change both together.
 
 **Scope (2026-10-25, user):** this service handles **data only** and **performance comes first**.
 Login, quota, edits, undo, unique-ID guard stay in Node's existing modules; `prototype/node_side/`
 is a test-only spec (no new Node logic). **D11** old Mongo forms stay as they are; **D12** new
 forms' import (xlsx first), type detection (one classifier per distinct value), `:validate` and
 derived fields (computed at read, never stored) live here; **D13** no merge with the analysis
-service for now.
+service for now; **D14** screening and the mini table (table fields) are legacy-only — old forms
+keep them, new forms never get them. **Follow-ups are needed** for new forms, exactly as Node does
+them today (a visit row exists once submitted; the schedule is worked out at read).
 
 **Just done (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
 hardened after a 55-agent adversarial review (every finding fixed with a test; 12,000 random
@@ -29,8 +31,8 @@ cases old-vs-new reader: 0 differences), benchmarked on 10M synthetic rows (§1 
 
 **Next, in order:**
 
-1. Data-Service-side Phase 0 scenarios (C13, C14, C16, C19, C21, C25, C26, C40, C43 done):
-   C1 / C36 / C37 → C9 / C12 (§2). Node-side ones (C4, C8, C17, C22–C24, C27, C30, C33, C38) run
+1. Data-Service-side Phase 0 scenarios (C12, C13, C14, C16, C19, C21, C25, C26, C40, C43 done):
+   C1 / C36 / C37 (with the ingest job, Phase 2.4) → C9 (§2). Node-side ones (C4, C8, C17, C22–C24, C27, C30, C33, C38) run
    against Node itself.
 2. Compaction file by file (keeps row-id clustering when patches exist, bounds memory to one
    file) — §2.
@@ -76,6 +78,7 @@ mangle backslashes on this box).
 | **Queue drain + poison operations**: only the head (lowest unfinished `seq`) runs; a failing attempt rolls its own commits back and is reported retryable or not (a wrong payload fails at once); Node retries until `max_attempts`, then fails it (C6); the sweeper dispatches operations whose wake-up was lost (C5); a lost lease (`FenceError` at Node's door) stops the drain without touching the operation | `modules/writer/service.py` (`run_operation`, `drain`), `prototype/node_side/operation_store.py` | `0254320` |
 | **Entry quota** (spec of Node's side): imports reserve with their operation (no room → `QUOTA_EXCEEDED`, no operation), publish settles (re-validated if released), final failure / cancel release, the sweeper releases only for finished or vanished operations (C7), the heartbeat renews every unfinished reservation; small edits charge inserts / restores and credit deletes; abandoned `running` heads are taken over | `prototype/node_side/quota_store.py`, `operation_store.py`, `authority.py` | `e03afa2` |
 | **Old versions**: fenced `vacuum` (token on VACUUM START / END, keeps the files of the versions Node reports pinned, never below the table's own file retention); `retention_configuration(days)` for every new table (log + removed files kept `DELTA_RETENTION_DAYS`, default 60); Settings refuse a retention not longer than `RESTORE_WINDOW_DAYS` (C14, C16) | `storage/fenced_commit.py`, `config/settings.py` | `40f4f95` |
+| **Follow-up visits** (Node's behaviour): patches carry their visit (0 = main, N = follow-up N; a table-field scope is refused, D14); the main reader lays only main-visit patches over base; `query_visits` / `merge_visits` read the `followups` table (`_rid`, `_follow_up`, fields) + visit patches for live rows only; delete / restore of a single visit refused; compaction refuses while visit patches would be dropped | `storage/reader/visits.py`, `storage/snapshot.py`, `storage/mongo_patches.py` | `d37e5a8` |
 | Library-facts probe (delta-rs / DuckDB), run in CI and on push | `probes/delta_api_probe.py` | `a15a439` |
 
 ### Tests (2026-10-25, `f48f84e`, all passing with the local Mongo up)
@@ -107,6 +110,7 @@ is **mutation-tested** (the reader: 26 of 26 mutants killed).
 | C39, C41, C42 | `test_compaction.py`, `test_compaction_stream.py` | Mongo + Delta, local Delta |
 | C13, C19, C40, C43 | `test_reads.py` | Mongo + Delta through the reader |
 | C14, C16 | `test_retention.py` | local filesystem Delta |
+| C12 (data side: the same field in visit 1, visit 2 and the main visit are three cells) | `test_reader_visits.py` | in memory + local Delta |
 | C25, C26 (Delta side: a base rewrite landing mid-compaction wins, the compaction gets `ConflictError`; a rewrite that folded a patch is read with `fromSeq` at its watermark) | `test_compaction_stream.py` | local filesystem Delta |
 | C21 (the reader's side: each revision read with its own schema; a schema that does not match its base is refused) | `test_reader_delta.py` | local filesystem Delta |
 
@@ -138,8 +142,8 @@ ids across every row group of a compacted base.
 
 ## 2. Not built yet
 
-**Phase 0 scenarios** still to automate (13 of 45): C1, C4, C8, C9, C12, C17, C22–C24, C27,
-C30, C33, C36–C38 — the Data-Service-side ones first (C1, C36, C37, C9, C12); C21's Node
+**Phase 0 scenarios** still to automate (12 of 45): C1, C4, C8, C9, C17, C22–C24, C27, C30,
+C33, C36–C38 — the Data-Service-side ones first (C1, C36, C37 with the ingest job; C9); C21's Node
 side (the `dataset_schemas` snapshot in the publish, restore bringing the schema back) and C27
 are Node's publish transaction; Node-side ones run against Node itself once it is built (scope decision, §0).
 
@@ -148,7 +152,10 @@ are Node's publish transaction; Node-side ones run against Node itself once it i
 - The BullMQ wake-up (dispatcher) and the sweeper's schedule; a refused publish after `committed`
   (C4: the drain stops and the operation stays at the head); payload encryption / S3 offload; quota reservations;
   `dataset_schemas`; field freeze; group commit for Delta jobs.
-- Reader: table and follow-up scopes, the `files` value type, child tables, caches, `_row_id`;
+- Follow-ups: folding the `followups` table in compaction (compaction refuses while visit patches
+  exist), the schedule (due date from the row's creation time — base needs `_created_at`),
+  grid / filter / sort over visits (today `query_visits` returns a revision's visits in order).
+- Reader: the `files` value type, caches, `_row_id`;
   a patch cache per revision (a revision's patch range never changes — fetch 100k patches from
   Mongo once, not per page; not measured yet).
 - **Compaction file by file**: with patches, the edits join (a parallel hash join) breaks the
@@ -230,3 +237,5 @@ are Node's publish transaction; Node-side ones run against Node itself once it i
 | 2026-10-25 | One DuckDB engine per process with one budget from Settings; a cursor per read |
 | 2026-10-25 | A delete without `at` and a patch without a row id are refused, not guessed |
 | 2026-10-25 | A full stream keeps the base's order (compaction, export) |
+| 2026-10-25 | **D14** (backend `2c9e864c`): screening and table fields are legacy-only; follow-ups stay, as Node does them |
+| 2026-10-25 | Node DataStore shape **B** (per-capability interfaces); Phase 1 routes only the paths new forms reach (70 of 108 sites, [node-phase1-audit.md](node-phase1-audit.md)); the legacy paths need real guards first (`form.storage`, refusing screening / table fields on Data Service forms, storage branches at JSON import, transforms, range check) |

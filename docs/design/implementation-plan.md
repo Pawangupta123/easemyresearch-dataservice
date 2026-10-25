@@ -20,9 +20,9 @@ protocol in [consistency.md](consistency.md) on real Delta on S3 before anything
 
 | # | Step |
 |---|---|
-| 0.1 | Decided: Delta + DuckDB, new repo, 10 GB max, full feature parity (PRD D4–D7); old forms and their code stay, new forms' data logic in Python, no merge with the analysis service yet (D11–D13). Still to answer: real dataset sizes + sample files (Q3), AWS budget (Q5) |
+| 0.1 | Decided: Delta + DuckDB, new repo, 10 GB max, full feature parity (PRD D4–D7); old forms and their code stay, new forms' data logic in Python, no merge with the analysis service yet (D11–D13); screening and table fields legacy-only (D14). Still to answer: real dataset sizes + sample files (Q3), AWS budget (Q5) |
 | 0.2 | Collect 5 real files: largest CSV, a typical `.sav`, an `.rds`, an `.RData` with several frames, an xlsx with a codebook sheet. Measure R in-memory size multiple |
-| 0.3 | New repository `easemyresearch-dataservice` (FastAPI, Python 3.12, uv, ruff, mypy, pytest, architecture check), same CI gates as the existing Python service. **Pin minimum delta-rs and duckdb-delta versions** that provide `txn` app transactions, `transaction_version`, `restore` / `vacuum(keep_versions)` and `delta_scan(version =>)` (consistency, facts list) |
+| 0.3 | New repository `easemyresearch-dataservice` (FastAPI, Python 3.12, uv, ruff, mypy, pytest, architecture check), same CI gates as the existing Python service. **Pin minimum delta-rs and DuckDB versions** that provide `txn` app transactions, `transaction_version`, `restore` / `vacuum(keep_versions)`, the file list of a pinned version (`DeltaTable(uri, version=n)`) and DuckDB's core `read_parquet` over it (consistency, facts list) |
 | 0.4 | AWS: S3 prefix `datasets/` (SSE-KMS, lifecycle rules for aborted multipart, raw and payload retention), ECR, ECS cluster, Fargate task + service definitions, Lambda container function, IAM roles (least privilege), VPC private networking, CloudWatch |
 | 0.5 | Service-to-service auth: Node signs short-lived service tokens; HMAC for callbacks; secrets (incl. the payload encryption key) in the existing secret store |
 | 0.6 | Observability: OpenTelemetry in both services, Prometheus metrics, dashboards for jobs, queries, operation queue age and lease state |
@@ -40,24 +40,27 @@ measured numbers (or the design is revised before Phase 1).
 
 ## Phase 1 — DataStore abstraction in Node (MongoStore only)
 
-**Goal:** every feature reads/writes row data through `DataStore`; behaviour unchanged.
+**Goal:** every feature that new forms use reads/writes row data through `DataStore`;
+behaviour unchanged. Paths reachable only for legacy-only features (screening, table fields —
+PRD D14) are not moved: they stay on Mongo, allow-listed by the lint rule (1.7), and the
+storage guard (1.5) keeps `dataservice` forms out of them.
 
 | # | Step |
 |---|---|
 | 1.1 | Add `src/v2/common/datastore/` with the interface ([tech-design §4.2](tech-design.md#42-the-interface)) and `MongoStore` wrapping Q / M / D |
-| 1.2 | Route the six bypasses through it: analysis stats, graphs, field variance, subset count, screening `$lookup`, raw `Q.aggregate` callers |
-| 1.3 | Move every service caller (submit, write, row lifecycle, bulk, grid read, export, import, transforms, unique identifier, type migration, column archive, revision adapter, AI record tools) to `DataStore`, keeping today's row scope per operation ([tech-design §4.3](tech-design.md#43-row-scope--as-the-code-does-it-today)) |
+| 1.2 | Route the bypasses that new forms reach through it: analysis stats, graphs, field variance, subset count, raw `Q.aggregate` callers. The screening `$lookup` (the attempts list) is legacy-only (D14): it stays on Mongo, allow-listed |
+| 1.3 | Move every service caller that new forms reach (submit, write, row lifecycle, bulk, grid read, export, import, transforms, unique identifier, type migration, column archive, revision adapter, AI record tools) to `DataStore`, keeping today's row scope per operation ([tech-design §4.3](tech-design.md#43-row-scope--as-the-code-does-it-today)); table-field reads (sub-row counts by `rowIndex`) only through `MongoStore` |
 | 1.4 | Add `form.storage` (default `'mongo'`, no backfill) and a resolver `dataStoreFor(form)` |
-| 1.5 | **Storage guard per feature and per form:** a feature not yet ported answers a `dataservice` form with a clear user error instead of touching Mongo; the guard list shrinks phase by phase |
+| 1.5 | **Storage guard per feature and per form:** a feature not yet ported answers a `dataservice` form with a clear user error instead of touching Mongo; the guard list shrinks phase by phase, except screening and table fields, which stay guarded for good (D14) |
 | 1.6 | Return `WriteResult` from writes and drive quota / `dataVersion` / staleness from it (same values as today) |
-| 1.7 | Lint rule: importing `Record` model or Q/M/D outside `datastore/` is an error |
+| 1.7 | Lint rule: importing `Record` model or Q/M/D outside `datastore/` is an error; an explicit allow-list holds the legacy-only paths (screening, table fields — D14), tests and migrations |
 
 **Tests:** full unit suite green; new unit tests on `MongoStore` per method; e2e on grid,
 bulk edit, column paste, undo, import, export against the test DB — results identical to
 before (snapshot the responses before the refactor and diff).
 
-**Acceptance:** zero behaviour change in production; every row access goes through
-`DataStore` (enforced by lint).
+**Acceptance:** zero behaviour change in production; every row access a new form can reach
+goes through `DataStore` (enforced by lint, with the legacy-only allow-list of D14).
 
 ---
 
@@ -97,8 +100,8 @@ end within the measured target; old forms unaffected.
 | 3.4 | Change log `dataset_changes` (+ job change files); per-row history and batch undo on it. **Batch-undo contract mapping:** `mutationId ≡ batchId`; preview keeps `entries`, `excluded`, `losses`, `lossSetHash`, `stateHashes`, `coverage`; result keeps `restoredCount`, `skipped`, `undoMutationId`; FE copy for per-cell `losses` reviewed ([consistency §8.2](consistency.md#82-todays-contracts-on-the-change-log)) |
 | 3.5 | Compaction outside the lease (trigger — patch count, idle time, maximum frequency — from config) publishing a new revision with `patches.fromSeq = W` ([consistency §15.2](consistency.md#152-compaction)); explicit whole-dataset restore as a separate, audited action |
 | 3.6 | **Retention / vacuum job:** pinned revisions from Node → per-table `keep_versions`, fenced `vacuum`, payload cleanup, patch deletion only when no retained or pinned revision needs them ([consistency §15.3](consistency.md#153-patch-retention)), `dataset_changes` trim, trash purge after 45 days ([consistency §11](consistency.md#11-retention)) |
-| 3.7 | Child tables for table fields and follow-ups (needed for CRF forms created on the Data Service) |
-| 3.8 | **Derived fields (PRD D12):** golden vectors from the TypeScript evaluators first (they have no unit tests today; pin the score `missingPolicy: 'zero'` all-empty case and the numeric-range default); one Python spec compiler → DuckDB expressions; read-time layer in the one reader per table (base, `followups`, `table_<fieldId>`) for every consumer; create / change = schema-only revision; Node keeps only metadata (source ids, dedupe keys, dependency graph). No `derived_recompute` job for Delta forms; spec-hash-keyed materialisation at compaction only if benchmarks show read-time computing is too slow ([tech design §7.2](tech-design.md#72-derived-fields-new-forms)) |
+| 3.7 | `followups` child table (needed for CRF forms created on the Data Service). No `table_<fieldId>` child tables: table fields are legacy-only (D14) |
+| 3.8 | **Derived fields (PRD D12):** golden vectors from the TypeScript evaluators first (they have no unit tests today; pin the score `missingPolicy: 'zero'` all-empty case and the numeric-range default); one Python spec compiler → DuckDB expressions; read-time layer in the one reader per table (base, `followups`) for every consumer; create / change = schema-only revision; Node keeps only metadata (source ids, dedupe keys, dependency graph). No `derived_recompute` job for Delta forms; spec-hash-keyed materialisation at compaction only if benchmarks show read-time computing is too slow ([tech design §7.2](tech-design.md#72-derived-fields-new-forms)) |
 
 **Tests:** concurrency tests (two Node instances editing, two writers, same dataset); undo after compaction; quota
 reconciliation; e2e parity — the same scripted edits on a `mongo` form and a `dataservice`
@@ -156,7 +159,7 @@ Lambda) was analysed and deferred (D13); it is not part of this plan.
 | 7.2 | Delete: soft delete with the 45-day window → purge job (S3 objects + Delta) |
 | 7.3 | Admin counts and plan quotas include `datasets.rowCount` / `storageBytes` |
 | 7.4 | AI record agent tools on `DataStore` (they already go through core services — verify caps and selection scope) |
-| 7.5 | Screening export and doc-build subset counts on `DataStore` |
+| 7.5 | Doc-build subset counts on `DataStore`. (Screening — its attempts list, the `$lookup` once listed here as an export — is legacy-only, D14: not ported) |
 
 ---
 

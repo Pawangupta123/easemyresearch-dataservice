@@ -61,6 +61,8 @@ a measured value.)*
   later — same library as SPSS).
 - Running user-written code (R or Python scripts) on the server.
 - Merging the Data Service with the existing Python analysis service (deferred, D13).
+- Screening and table fields (mini tables) on Data Service forms — legacy-only, kept for old
+  forms (D14).
 
 ---
 
@@ -181,6 +183,8 @@ Retention mechanics: [consistency §11](consistency.md#11-retention).
 - The Node code that serves `mongo` forms today — import, derived-field evaluators, Mongo grid
   filters, type conversion — keeps serving them unchanged and is frozen: no new rules are added
   to it (D11). For `dataservice` forms the Data Service owns that logic (D12).
+- Screening and table fields stay on `mongo` forms only; `dataservice` forms do not offer them
+  (D14).
 - All features reach row data through one **DataStore** interface with two implementations,
   so a feature works the same on both. See [tech-design.md §4](tech-design.md#4-datastore-abstraction).
 - Optional later: move an old form on demand (user action or size threshold). Not required.
@@ -202,6 +206,7 @@ Retention mechanics: [consistency §11](consistency.md#11-retention).
 | D11 | **Old forms stay as they are.** `storage: 'mongo'` forms are never migrated, and the Node code that serves them keeps serving them unchanged: import (`src/v2/modules/import`), derived-field evaluators (transform formula / score / conditional / field-pick helpers, `record/core/helpers/write/multifield-derived.helper.ts`), Mongo grid filters (`record/core/helpers/read/db-filter.helper.ts`, `record/analysis/helpers/analysis-filter.helper.ts`) and type conversion (`common/utils/field-conversion.util.ts`). This is the legacy store's code, not duplication to remove — frozen: no new rules are added to it | 2026-10-25 |
 | D12 | **New forms: the Data Service owns their data logic.** Import of every format (xlsx first, then CSV / Parquet, later `.sav` / `.rds`): the file is staged once to Parquet, one classifier runs per distinct value of each column, and detection, option suggestions, notices and the optional AI refine come from that value map; ingest casts by the same map, so the preview is what is committed. Confirm-time validation is one synchronous Data Service call whose form draft Node persists as is. Derived fields are compiled once in Python and computed **at read** by the one reader — never stored or patched. Node keeps auth, Zod shape, quota, jobs and derived metadata (sources, dedupe keys, staleness graph). Today's Node rules are the reference for golden test vectors, not a second engine — [tech-design §7.1](tech-design.md#71-import-and-type-detection-new-forms), [§7.2](tech-design.md#72-derived-fields-new-forms) | 2026-10-25 |
 | D13 | **No merge with the existing Python analysis service, for now.** Two services stay; the analysis service reads Data Service rows at a pinned revision through the Data Service ([tech-design §4.6](tech-design.md#46-python-analysis-on-data-service-datasets)). A later merge (one repository, workload roles api / jobs / Lambda) was analysed and deferred; it is not planned | 2026-10-25 |
+| D14 | **Screening and table fields are legacy-only** (an exception to D7). Screening (inclusion / exclusion criteria and screening attempts) and table fields (the mini table inside a form: sub-rows by `parentFieldId` + `rowIndex`) are kept for old users only: `mongo` forms keep them through the frozen Node code (D11); `dataservice` forms never offer them — the per-feature storage guard answers a clear error. So the Data Service has no table-field scope (no `table` patch target, no `table_<fieldId>` child table) and no screening join, and Node Phase 1 routes through `DataStore` only the paths new forms use; the legacy-only paths stay on Mongo, allow-listed by the lint rule. Follow-ups are **not** legacy and stay in scope — [feature-parity §2](feature-parity.md#2-data-entry-and-records) | 2026-10-25 |
 
 ## 7. Open questions
 

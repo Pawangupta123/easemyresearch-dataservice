@@ -1,6 +1,6 @@
 # Data Service
 
-> **Copy of the backend design (2026-10-25).** This folder and `EaseMyResearch_Backend_V1/docs/architecture/data-service/` must be kept identical — change both in the same change-set (this note is the only difference; copied from backend branch `docs/data-service-hybrid-edits`, commit `22a20996`).
+> **Copy of the backend design (2026-10-25).** This folder and `EaseMyResearch_Backend_V1/docs/architecture/data-service/` must be kept identical — change both in the same change-set (this note is the only difference; copied from backend branch `docs/data-service-hybrid-edits`, commit `2c9e864c`).
 
 **Status:** Proposed · design under review · Phase 0 prototype in progress · **Last updated:** 2026-10-25
 
@@ -22,10 +22,10 @@ detection, validation and derived fields (computed at read, never stored).
 |---|---|
 | [prd.md](prd.md) | Problem, goals (targets until Phase 0), requirements, configuration, coexistence rule, decisions, open questions |
 | [tech-design.md](tech-design.md) | Architecture, why Delta + DuckDB (and not Databricks yet), compute (Lambda / Fargate / always-on), DataStore abstraction, row scope as the code does it today, edits (Mongo patches + compaction), import + type detection, derived fields at read, transforms, grid queries, security, failure handling |
-| [data-model.md](data-model.md) | Mongo collections (metadata, `form.storage`, `dataset_patches`, `dataset_changes`, unique claims), Delta tables (base, child tables) |
+| [data-model.md](data-model.md) | Mongo collections (metadata, `form.storage`, `dataset_patches`, `dataset_changes`, unique claims), Delta tables (base, `followups`) |
 | [api.md](api.md) | Public Node routes, internal Node ↔ Data Service API, callbacks, error codes |
 | [feature-parity.md](feature-parity.md) | Every feature that exists today (verified against `src/v2`) and how it works on the Data Service, with its phase and deliberate changes |
-| [consistency.md](consistency.md) | **Correctness protocol (v3.4, 2026-10-25)**: revision manifests (Delta versions + patch range), the small-edit Mongo transaction, the one reader and compaction, S3 conditional-write commits (C0 passed, no lock table), CAS writer lease with a fence commit in every table + attempt-aware reconciliation, durable operations + outbox for Delta jobs, schema snapshots per revision, post-publish event outbox, quota, multi-user editing (edits serialize on the revision, later commit wins with history), per-cell undo on the Mongo change log, nested cell addressing, retention, caches — and scenarios C0–C44 that must pass in Phase 0 |
+| [consistency.md](consistency.md) | **Correctness protocol (v3.5, 2026-10-25)**: revision manifests (Delta versions + patch range), the small-edit Mongo transaction, the one reader and compaction, S3 conditional-write commits (C0 passed, no lock table), CAS writer lease with a fence commit in every table + attempt-aware reconciliation, durable operations + outbox for Delta jobs, schema snapshots per revision, post-publish event outbox, quota, multi-user editing (edits serialize on the revision, later commit wins with history), per-cell undo on the Mongo change log, nested cell addressing, retention, caches — and scenarios C0–C44 that must pass in Phase 0 |
 | [implementation-plan.md](implementation-plan.md) | Phases 0–8 (prototype + benchmarks first, publish path before ingest) with steps, tests, acceptance, cost, risks |
 
 **Decided (2026-10-21):** Delta Lake on S3 + DuckDB for rows (not MongoDB, not
@@ -39,7 +39,9 @@ cell the later commit wins with the earlier value kept in history (PRD D8–D10)
 
 **Decided (2026-10-25):** old forms and their Node code stay as they are, frozen; new forms'
 import, detection, validation and derived fields (computed at read) live in the Data Service;
-a merge with the analysis service is deferred to later (PRD D11–D13).
+a merge with the analysis service is deferred to later (PRD D11–D13); screening and table
+fields (mini tables) are legacy-only — old forms keep them, new forms do not offer them, so the
+Data Service has no table-field scope and no screening join (PRD D14).
 
 **Still open:** typical dataset sizes + sample files (Q3) and the AWS budget (Q5) — the
 design does not depend on them; Phase 0 infra sizing and the performance targets do.

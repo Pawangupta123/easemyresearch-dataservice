@@ -35,7 +35,7 @@ retrying with the key returns the committed edit or picks the operation up
 | `POST /forms/:formId/records` (grid list) | Additive body fields: `columns?: string[]` (visible field ids), higher `limit` cap from config. The revision rides **inside** the existing cursor (format unchanged), so later pages read the same snapshot |
 | `GET /forms/:formId/records/:recordId`, `…/:recordId/view` | `recordId` = the row's public `_rid` (an ObjectId string), so existing validators keep working |
 | `POST /forms/records` (submit, `formId` in the body) · `POST /forms/:formId/records/add-row` | Small edit: `insert_row` + `set` patches in one edit transaction; quota checked in it |
-| `POST /forms/records-followup` (`formId`, `recordId`, `followUpNumber` in the body) | Small edit: patches on the follow-up cells (`scope.kind: 'followup'`, or `'table'` with its `followUp`) |
+| `POST /forms/records-followup` (`formId`, `recordId`, `followUpNumber` in the body) | Small edit: patches on the follow-up cells (`scope.kind: 'followup'`); no `table` scope — table fields are legacy-only (PRD D14) |
 | `POST /forms/:formId/records/:recordId` | Row edit → one edit transaction (only the changed cells) |
 | `PATCH /forms/:formId/records/bulk-edit` | One edit transaction per request / save part (also the target of **column paste**); today's 500-row cap (`BULK_EDIT_MAX_ROWS`) is the small-edit cap; bigger rule-based changes are set-based Delta jobs |
 | `POST /forms/:formId/record-ids` | Grid-order ids for column paste; carries its revision, targets deleted since → `ROW_GONE` |
@@ -119,7 +119,7 @@ through the **one reader**: the Delta tables at the manifest's versions merged w
 | `POST /v1/datasets/{id}/rows:query` | `{ revision, manifest, columns, filter, sort, search, offset \| cursor, limit }` | `{ revision, rows: [{ _rid, values: {fieldId: typedValue} }], next? }` |
 | `POST /v1/datasets/{id}/rows:count` | `{ revision, manifest, filter, search }` | `{ revision, count }` (cache key: dataset, revision, row scope, filter, search) |
 | `POST /v1/datasets/{id}/rows:ids` | `{ revision, manifest, filter, sort, cap }` | `{ revision, ids: [...] }` |
-| `POST /v1/datasets/{id}/rows/{rid}:get` | `{ revision, manifest }` | One row incl. child tables and follow-ups |
+| `POST /v1/datasets/{id}/rows/{rid}:get` | `{ revision, manifest }` | One row incl. its follow-ups |
 | `POST /v1/datasets/{id}/cells:read` | `{ revision, manifest, targets, unique?: { fieldId, values, exceptRids } }` | `{ revision, cells: [{ target, value }], rows: [{ _rid, state, createdBy }], uniqueTaken: [...] }` — the `before` values, row state / scope and unique check a small edit reads before its transaction ([consistency §14.2](consistency.md#142-the-edit-transaction)) |
 | `POST /v1/datasets/{id}/rows:stream` | `{ revision, manifest, columns, filter }` | Rows of a revision (row scope from the token) for the existing Python analysis service and exports (projected columns, filters pushed down) — that service never reads Delta or patches itself |
 | `POST /v1/datasets/{id}/fields/{fieldId}:sample` | `{ revision, manifest, n }` | Sample values |
@@ -249,3 +249,4 @@ never complete, fail or publish a newer one
 | `IDEMPOTENCY_MISMATCH` | The same idempotency key was sent with a different request |
 | `TOO_LATE` | Cancel arrived after the operation committed; it completes normally |
 | `FORM_DELETED` | The form was deleted before the operation published; nothing was written |
+| `FEATURE_NOT_AVAILABLE` | The storage guard's answer: the feature is not available on a `dataservice` form — not ported yet, or legacy-only (screening, table fields — PRD D14) |

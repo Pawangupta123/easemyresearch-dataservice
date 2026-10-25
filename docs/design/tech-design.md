@@ -19,7 +19,9 @@ Data Service merges both for every read (hybrid edits, decided 2026-10-24).
 Short jobs run on **Lambda**, heavy jobs on **Fargate**, and the interactive grid is served by
 a small **always-on query service**. Existing forms stay on MongoDB with today's Node code
 (D11); for new forms the Data Service owns import, type detection, validation and derived
-fields (D12, §7.1–§7.2); a **DataStore** interface hides which store a form uses.
+fields (D12, §7.1–§7.2); a **DataStore** interface hides which store a form uses. Screening
+and table fields (mini tables) are legacy-only: old forms keep them on Mongo, new forms do not
+offer them (D14).
 
 ```
             ┌──────────────────────── Browser (FE) ───────────────────────┐
@@ -163,8 +165,8 @@ Thresholds are configuration (`DATA_SERVICE_*` env / config collection), never c
 
 Almost all row access goes through three repositories in `src/v2/modules/record/`:
 `record-query.repository.ts` (Q), `record-mutation.repository.ts` (M) and
-`record-deleted-query.repository.ts` (D). Six places bypass them and must be routed through
-the DataStore first:
+`record-deleted-query.repository.ts` (D). Six places bypass them; the five that new forms
+reach must be routed through the DataStore first:
 
 | Bypass | File |
 |---|---|
@@ -172,8 +174,11 @@ the DataStore first:
 | `Record.aggregate` (graphs) | `record/graphs/graphs.repository.ts:34,91,146` |
 | `Record.aggregate` (field variance) | `analysis/ai/document-build/document-field-variance.service.ts:46,74` |
 | `countDocuments` | `analysis/ai/document-build/builders/document-subset-title.service.ts:48` |
-| `$lookup from: 'records'` | `record/screening/screening.repository.ts:268-300` |
+| `$lookup from: 'records'` — screening attempts list, **legacy-only** (D14): stays on Mongo, allow-listed by the lint rule, never routed | `record/screening/screening.repository.ts:268-300` |
 | Raw `Q.aggregate()` with caller-built pipelines | transforms, follow-up schedule, conversion |
+
+Likewise every path reachable only through a table field (sub-row counts by `rowIndex`,
+`parentFieldId` entries) is legacy-only (D14) and stays on `MongoStore`.
 
 Python analysis reads `forms` and `records` straight from MongoDB (Node sends only
 `formId` + optional `recordIds`) — see §4.6.
@@ -182,7 +187,8 @@ Python analysis reads `forms` and `records` straight from MongoDB (Node sends on
 
 One interface, two implementations, chosen by `form.storage` and guarded **per feature**: a
 feature flag per form decides `mongo` vs `data-service`, and a feature not yet ported refuses
-`data-service` forms with a clear error instead of reading the wrong store.
+`data-service` forms with a clear error instead of reading the wrong store. Screening and table
+fields are refused for good, not "not yet" (D14).
 
 Today several writes are atomic Mongo transactions (form update with row changes, transforms,
 revision restore, bulk delete + quota). The interface keeps that with an **operation
@@ -206,7 +212,7 @@ interface DataStore {
   sampleFieldValues(formId, fieldIds, n): Promise<Map<FieldId, unknown[]>>;
   optionUsage(formId, fieldIds): Promise<Map<OptionId, number>>;
   fieldStats(formId, req: FieldStatsRequest): Promise<FieldStats>;          // MCQ counts, numeric stats, graph axes
-  rowIndexStats(formId, parentFieldIds): Promise<RowIndexStats>;           // table-field sub-row counts
+  rowIndexStats(formId, parentFieldIds): Promise<RowIndexStats>;           // table-field sub-row counts — MongoStore only (D14)
   columnDrift(formId, fieldIds): Promise<ColumnDrift>;                     // archived vs current values
   exists(formId): Promise<boolean>;
   uniqueValueExists(formId, value, exceptRowId?): Promise<boolean>;
@@ -247,6 +253,10 @@ interface WriteResult { rowsChanged: number; rowsAdded: number; rowsRemoved: num
 - Column archives copy values into Mongo today; on the Data Service the archived column stays
   in Delta (hidden), and `columnDrift` compares it with the current one.
 - `scope` carries the caller's row scope (§4.3). The Data Service stores `_created_by` per row.
+- Legacy-only capabilities (D14) — table-field sub-row reads (`rowIndexStats`, the
+  `parentFieldId` / `rowIndex` entries) and the screening join — exist only on `MongoStore`;
+  `DataServiceStore` does not implement them, and the storage guard refuses those features
+  for `dataservice` forms.
 
 ### 4.3 Row scope — as the code does it today
 
@@ -298,7 +308,7 @@ as today. `RecordsCoreReadService` picks the store:
 
 | Grid path today | Data Service equivalent |
 |---|---|
-| Fast path (default sort, offset/cursor) | `rows:query`, default order `createdAt desc, _id desc`; child rows by `rowIndex` |
+| Fast path (default sort, offset/cursor) | `rows:query`, default order `createdAt desc, _id desc`; follow-up rows by `followUp` |
 | Column sort (reads every row, sorts in memory) | `rows:query` with `sort` — done in DuckDB, not in Node |
 | Filter / search pipeline (`buildRecordGridPipeline`) | `rows:query` with the same filter tree, compiled to SQL |
 
@@ -308,7 +318,8 @@ as today. `RecordsCoreReadService` picks the store:
   request field, `columns` (only visible field ids).
 - Filter tree: today's operators (text contains/equals; number equals/gt/lt/between; date
   equals/before/after/between; choice in/equals) map one-to-one, including the
-  `rowIndex` / follow-up scope and search parity; `isEmpty` is new.
+  follow-up scope and search parity; `isEmpty` is new. The `rowIndex` (table-field) scope is
+  legacy-only and has no equivalent (D14).
 - **Export:** below a configured row threshold, today's synchronous `arraybuffer` response is
   kept; above it, a new async export route (job + S3 link). The FE changes only for the large
   path.
@@ -328,22 +339,27 @@ list in memory) and `bulk_report` (which also filters `deletedAt`). Both read `_
    Delta files or `dataset_patches` itself; the Data Service's one reader merges them
    ([consistency §15.1](consistency.md#151-the-reader)).
 2. Phase 1 of this: `DataServiceRowSource` yields the **same in-memory record shape and fields**
-   the engines expect (`data[] = {fieldId, value, optionIds, rowIndex, …}`) — zero engine
-   changes, correct results, fine up to ~1 M rows (target).
+   the engines expect (`data[] = {fieldId, value, optionIds, followUpNumber, …}`) — zero engine
+   changes, correct results, fine up to ~1 M rows (target). `rowIndex` / `parentFieldId` are
+   never set: `dataservice` forms have no table fields (D14).
 3. Phase 2: engines move to columnar frames of the needed columns (pandas, already a
    dependency) one analysis at a time, behind parity tests, for very large datasets.
 4. Long analyses move from the 30 s synchronous call to a job (the Data Service job runner),
    with the existing recompute flow polling its result. Analyses store `computedAtRevision`.
 
-### 4.7 Nested data (table fields, follow-ups)
+### 4.7 Nested data (follow-ups)
 
-Records hold table-field sub-rows (`rowIndex`, `parentFieldId`) and follow-up visits
-(`followUpNumber`, `followUpStatus`) inside one document. Imported flat files have neither;
-CRF forms created on the Data Service will. Model as child Delta tables keyed to the parent
-row: `table_<fieldId>` keyed by (`_row_id`, `parentFieldId`, `rowIndex`, `followUp`) and
-`followups(_row_id, follow_up, status, f_<fieldId>…)`, with `followUp = 0` the main visit
+Records hold follow-up visits (`followUpNumber`, `followUpStatus`) and, on old forms,
+table-field sub-rows (`rowIndex`, `parentFieldId`) inside one document. Imported flat files
+have neither; CRF forms created on the Data Service can have follow-ups. Model them as one
+child Delta table keyed to the parent row: `followups(_row_id, follow_up, status,
+f_<fieldId>…)`, with `followUp = 0` the main visit
 ([consistency §9](consistency.md#9-cell-addressing-and-values)). Grid, export and analysis
-join them on `_row_id` where requested.
+join it on `_row_id` where requested.
+
+Table fields (the mini table inside a form) are legacy-only (D14): `mongo` forms keep them
+through today's code, `dataservice` forms never offer them, so there is no `table_<fieldId>`
+child table and no `table` patch target.
 
 ### 4.8 Write concurrency and uniqueness
 
@@ -387,7 +403,7 @@ s3://<bucket>/datasets/<datasetId>/
   table/                                        # Delta table: base data
      _delta_log/…                               # versions (pinned by published revisions)
      part-*.parquet
-  table_<fieldId>/, followups/                  # Delta tables: nested data (§4.7)
+  followups/                                    # Delta table: follow-up visits (§4.7)
   changes/<jobId>.parquet                       # before/after of one big Delta job (undo)
   exports/<jobId>/<file>
   reports/<jobId>.json                          # cleaning / transform reports
@@ -421,7 +437,7 @@ A cell edit on a 30-million-row table must not rewrite Parquet files — and, wi
 (decided 2026-10-24), it does not touch Delta at all. Model:
 
 1. **Patches in Mongo** (`dataset_patches`): `{ datasetId, seq, target, op, value, opId,
-   batchId, actor, at }`, where `target` addresses main, table-row and follow-up cells and
+   batchId, actor, at }`, where `target` addresses main and follow-up cells and
    `value` is typed `{ t, v }` ([consistency §9](consistency.md#9-cell-addressing-and-values)).
    `seq` comes from the `datasets.patchSeq` counter.
 2. **Edit transaction** — Node reads the current values of the targets at revision n through
@@ -525,7 +541,7 @@ and not kept "in parity" as a second engine.
 - **One spec compiler** in the Data Service turns a derived field's spec (formula, score,
   conditional, field-pick — today's catalogue) into a DuckDB expression.
 - **Computed at read.** The one reader adds the derived columns to every read of a revision,
-  per table (base, `followups`, `table_<fieldId>`), for every consumer: grid (sort, filter,
+  per table (base, `followups`), for every consumer: grid (sort, filter,
   counts), export, field stats, and `rows:stream` for the analysis service. They are **never
   stored or patched**: no Delta column, no `dataset_patches`, no backfill, and no
   `derived_recompute` job for `dataservice` forms; compaction has nothing derived to fold.

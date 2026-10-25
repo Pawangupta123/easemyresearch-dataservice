@@ -5,7 +5,7 @@
 **Back to:** [prd.md](prd.md) · [tech-design.md](tech-design.md) · [consistency.md](consistency.md) · [implementation-plan.md](implementation-plan.md)
 
 Decision D7: **every feature that works on a `mongo` form today works on a `dataservice`
-form**, with the same API and UI. This table is the checklist; a phase is not done until its
+form**, with the same API and UI — except the legacy-only features of D14 (below). This table is the checklist; a phase is not done until its
 rows pass the parity e2e suite (same scripted actions on both stores → same result).
 
 Source of the "today" column: record-access inventory of 2026-10-21 (tech design §4.1),
@@ -20,6 +20,13 @@ The "today" code keeps serving `mongo` forms unchanged and frozen — it is the 
 code, not duplication to remove (PRD D11). For `dataservice` forms the Data Service owns import,
 type detection, validation and derived fields (PRD D12,
 [tech design §7.1–§7.2](tech-design.md#7-import-derived-fields-transforms-and-cleaning)).
+
+**Exception — legacy-only features (PRD D14).** Screening and table fields (the mini table
+inside a form) are kept for old users only: `mongo` forms keep them through today's frozen
+code; `dataservice` forms never offer them — the CRF editor cannot add a table field or
+screening criteria there, and every route of these features answers a `dataservice` form with
+the storage guard's clear error. Rows marked **legacy-only** below are not part of the parity
+suite.
 
 ---
 
@@ -45,11 +52,11 @@ the scope is part of every cache key ([consistency §12](consistency.md#12-cache
 | CRF form submit, add empty row | `M.createRecord` | small edit: `insert_row` + `set` patches in one edit transaction | 3 |
 | Cell / row edit | merge + `M.updateRecordDataForUser` (replaces the whole `data` array — a concurrent bulk edit + row edit can drop one) | **Δ** cell-level patches in one edit transaction; concurrent edits serialize on the revision CAS; different cells never collide; same cell = the later commit wins, earlier value kept in history + undo ([consistency §4.7](consistency.md#47-many-users-on-one-dataset), [§14.3](consistency.md#143-concurrency--edits-serialize-on-the-revision)) | 3 |
 | Follow-ups (submit / read / schedule) | entries with `followUpNumber` in the record | `followups` child table; patches with target `scope.followUp` ([consistency §9](consistency.md#9-cell-addressing-and-values)) | 3 |
-| Table fields (sub-rows) | entries with `rowIndex`, `parentFieldId` | `table_<fieldId>` child table; target `parentField + rowIndex + followUp` | 3 |
+| Table fields (mini table, sub-rows) — **legacy-only** | entries with `rowIndex`, `parentFieldId` | not offered (PRD D14): no `table` patch target, no `table_<fieldId>` child table; the storage guard refuses a table field on a `dataservice` form | — |
 | File-type fields | **array** of S3 URLs per field (incoming + uploaded, max-files check); signed read | `v_files` list of `{url, key?, name?, size?}` — every URL preserved; same signed read | 3 |
 | Derived fields on write **Δ** | `recomputeMultiFieldDerived` on submit / edit / bulk edit | none: the edit writes only its source cells; derived columns are computed at read by the one reader; Node marks dependent fields stale from its derived dependency graph | 3 |
 | Unique identifier (guard, check-unique) | partial unique index + `uniqueIdentifierValue` | small edits: `dataset_unique_claims` (unique index) + reader check inside the edit transaction (C44); Delta jobs: whole-column check before commit (C1) | 3 |
-| Screening (inclusion / exclusion) | `ScreeningAttempt` collection in Mongo | unchanged (Mongo); only the export join reads rows | 3 / 7 |
+| Screening (inclusion / exclusion, attempts) — **legacy-only** | `ScreeningAttempt` collection in Mongo; criteria fields hidden from the grid | not offered (PRD D14): no screening join; the storage guard refuses screening on a `dataservice` form | — |
 | Hidden fields for non-owners | dropped in grid read | same, on the projected columns | 2 |
 
 ## 3. Grid
@@ -88,7 +95,7 @@ the scope is part of every cache key ([consistency §12](consistency.md#12-cache
 
 | Feature | Today | On the Data Service | Phase |
 |---|---|---|---|
-| Formula / score / conditional / field-pick derived fields (create, backfill) **Δ** | keyset pages + `bulkWrite` / `updateMany` | one Python spec compiler → DuckDB expressions computed **at read** per table (base, `followups`, `table_<fieldId>`) for every consumer; create / change = schema-only revision, nothing stored or backfilled; golden vectors from the TS evaluators first | 3 |
+| Formula / score / conditional / field-pick derived fields (create, backfill) **Δ** | keyset pages + `bulkWrite` / `updateMany` | one Python spec compiler → DuckDB expressions computed **at read** per table (base, `followups`) for every consumer; create / change = schema-only revision, nothing stored or backfilled; golden vectors from the TS evaluators first | 3 |
 | Derived recompute after source edits | per-row in write paths | none — nothing is stored, so nothing is recomputed (no derived-recompute job); staleness from the dependency graph | 3 |
 | Conversion (analyze / apply), range helpers | aggregate + pipeline update | same spec, executed by the Data Service | 6 |
 | Cleaning rules + report | — (new) | rule catalogue → revision + report | 6 |
@@ -102,7 +109,7 @@ the scope is part of every cache key ([consistency §12](consistency.md#12-cache
 | Analysis staleness / recompute | from write paths | the changed fields plus the derived fields depending on them (Node's dependency graph), marked in the edit or publish transaction; recompute through the event outbox (today's debounced auto-recompute); compaction marks nothing | 3 |
 | Filter → record ids for subsets | `findFilteredRecordIds` | `rows:ids` | 2 |
 | Export to Excel | synchronous, in memory (`downloadAll` loads every row) | synchronous below a size threshold; above it an async export job (xlsx/csv/sav/parquet) | 7 |
-| Screening export | `$lookup` on records | DataStore join | 7 |
+| Screening attempts list — **legacy-only** | `$lookup` on records (`screening.repository.ts`; the attempts list, not an export) | not offered (PRD D14); stays on Mongo, allow-listed by the Phase 1 lint rule | — |
 
 ## 8. AI features
 
