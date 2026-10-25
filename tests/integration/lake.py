@@ -6,14 +6,19 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import pyarrow as pa
-from deltalake import write_deltalake
+from deltalake import DeltaTable, write_deltalake
 from pymongo import MongoClient
 from pymongo.database import Database
 
+from dataservice.storage.compaction import compact
+from dataservice.storage.fenced_commit import CommitContext, OpRef, max_token_seen
+from dataservice.storage.lease import Lease
 from dataservice.storage.mongo_patches import MongoPatchSource
 from dataservice.storage.reader import read_rows
 from dataservice.storage.snapshot import UTC_TIMESTAMP, FieldSpec, Snapshot
+from prototype.node_side.compaction_store import MongoCompactionStore
 from prototype.node_side.edit_store import Edit, MongoEditStore, Target
+from prototype.node_side.lease_store import MongoLeaseStore
 from prototype.node_side.quota_store import MongoQuotaStore
 
 Document = dict[str, object]
@@ -101,3 +106,26 @@ class Lake:
 
     def edit(self, key: str, *edits: Edit, actor: str = "user-a", batch: str | None = None) -> int:
         return self.store.apply(DATASET, actor, key, list(edits), self.before, self.in_base, batch_id=batch).revision
+
+
+class Compactor:
+    def __init__(self, lake: Lake, db: Database[Document]) -> None:
+        self.lake = lake
+        self.leases = MongoLeaseStore(db, ttl_ms=60_000)
+        self.store = MongoCompactionStore(lake.client, db, self.leases)
+
+    def lease(self) -> Lease:
+        lease = self.leases.acquire(DATASET, "compactor", max_token_seen([DeltaTable(self.lake.base_uri)]))
+        assert lease is not None
+        return lease
+
+    def prepare(self, base_revision: int, lease: Lease) -> tuple[int, int]:
+        """Data Service side: fold the base revision's patches into a new base."""
+        context = CommitContext(lease.token, (OpRef(f"compact-{base_revision}", 1),), ("base",))
+        result = compact(self.lake.snapshot(base_revision), self.lake.patches, context)
+        return result.base_version, result.folded_to
+
+    def run(self) -> int:
+        base_revision, lease = self.lake.current_revision(), self.lease()
+        base_version, folded_to = self.prepare(base_revision, lease)
+        return self.store.publish(DATASET, lease, base_revision, base_version, folded_to)
