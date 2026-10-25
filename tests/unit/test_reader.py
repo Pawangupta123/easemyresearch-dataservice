@@ -24,10 +24,13 @@ BASE = pa.table(
 )
 
 
+WRITTEN_AT = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)  # Node stamps every patch
+
+
 def _patch(
     seq: int, op: str, row: str, field: str | None = None, t: str | None = None, **values: object
 ) -> dict[str, object]:
-    return {"seq": seq, "op": op, "row": row, "field": field, "t": t} | {
+    return {"seq": seq, "op": op, "row": row, "field": field, "t": t, "at": WRITTEN_AT} | {
         column: values.get(column) for column in ("v_str", "v_num", "v_date", "v_opts")
     }
 
@@ -98,8 +101,9 @@ def test_rows_come_back_in_row_id_order() -> None:
 
 
 def test_a_field_id_that_is_not_a_plain_identifier_is_refused() -> None:
-    with pytest.raises(ValueError, match="invalid field id"):
-        FieldSpec("age'; DROP TABLE base; --", "num")
+    for bad in ("age'; DROP TABLE base; --", "age\n", ""):  # "$" alone would let the newline through
+        with pytest.raises(ValueError, match="invalid field id"):
+            FieldSpec(bad, "num")
 
 
 class _Patches:

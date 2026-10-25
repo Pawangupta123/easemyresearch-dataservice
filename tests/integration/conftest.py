@@ -58,9 +58,9 @@ class S3:
 def s3() -> Iterator[S3]:
     """An in-process S3 (moto) — real HTTP, real conditional-write semantics, no container.
 
-    Limitation (2026-10-24): delta-rs *data* reads (Parquet GETs through DataFusion) stall
-    against moto's server, while writes, log reads and boto3 range GETs work. Tests here assert
-    on the Delta log; read-path tests need a real S3-compatible endpoint.
+    delta-rs *data* reads (Parquet GETs through DataFusion) stall against moto's server, while
+    its writes and log reads work — and the reader reads Parquet through DuckDB, which reads
+    moto fine (test_reader_s3.py).
     """
     server = ThreadedMotoServer(ip_address="127.0.0.1", port=0)
     server.start()

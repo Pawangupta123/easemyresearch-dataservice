@@ -30,10 +30,13 @@ BASE = pa.table(
 )
 
 
+WRITTEN_AT = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)  # Node stamps every patch
+
+
 def _patch(
     seq: int, op: str, row: str, field: str | None = None, t: str | None = None, **values: object
 ) -> dict[str, object]:
-    return {"seq": seq, "op": op, "row": row, "field": field, "t": t} | {
+    return {"seq": seq, "op": op, "row": row, "field": field, "t": t, "at": WRITTEN_AT} | {
         column: values.get(column) for column in ("v_str", "v_num", "v_date", "v_opts")
     }
 
@@ -161,7 +164,7 @@ def test_scan_streams_every_row_in_batches(tmp_path: Path) -> None:
 def test_a_filter_on_an_untouched_field_reaches_the_parquet_scan(tmp_path: Path) -> None:
     uri = str(tmp_path / "base")
     write_deltalake(uri, BASE)
-    plan = explain(
+    [plan] = explain(
         _snapshot(uri), _Source(EDITS), Query(fields=("name",), filters=(Filter("visit", "ge", date(2026, 2, 1)),))
     )
     assert "Filters: f_visit >= '2026-02-01'::DATE" in plan  # pushed into the Parquet scan itself
@@ -210,10 +213,9 @@ def test_a_page_read_in_two_passes_equals_the_one_pass_read(request_: Query, mon
 def test_a_page_reads_only_its_own_rows_in_full(tmp_path: Path) -> None:
     uri = str(tmp_path / "base")
     write_deltalake(uri, BASE)
-    plan = explain(_snapshot(uri), _Source(EDITS), Query(fields=("symptoms",), sort=(Sort("visit"),), limit=2))
-    find, read = plan.split("f_symptoms", 1)
-    assert "f_visit" in find and "_rid IN" not in find  # pass 1: row id and sort column only
-    assert "(_rid IN ('r1', 'r4'))" in read  # pass 2: the Parquet scan asks for the page's rows only
+    find, read = explain(_snapshot(uri), _Source(EDITS), Query(fields=("symptoms",), sort=(Sort("visit"),), limit=2))
+    assert "f_visit" in find and "f_symptoms" not in find  # pass 1: row id, sort column and row state only
+    assert "f_symptoms" in read and "SEMI" in read  # pass 2: the full rows, joined to the page's ids
 
 
 def test_a_row_id_with_a_quote_is_read_back_as_itself() -> None:

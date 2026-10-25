@@ -51,6 +51,9 @@ def compact(snapshot: Snapshot, patch_source: PatchSource, context: CommitContex
         missing = set(expected.names) - set(merged.schema.names)
         if missing:
             raise ValueError(f"compaction would drop base columns {sorted(missing)}; the snapshot lists every field")
+        unstored = set(merged.schema.names) - set(expected.names)
+        if unstored:  # the field's schema change must add the column first, or its values would be lost
+            raise ValueError(f"fields {sorted(unstored)} have no column in the base table yet")
         # Types must already match: a silent cast could change values (and pyarrow's cast needs
         # its compute library, which Windows Application Control blocks on the dev box).
         drifted = [

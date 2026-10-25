@@ -14,7 +14,7 @@ ValueType = Literal["str", "num", "date", "opts"]
 PatchOp = Literal["set", "insert_row", "delete_row", "restore_row"]
 
 # Field ids become column names in generated SQL — only plain identifiers are accepted.
-FIELD_ID = re.compile(r"^[A-Za-z0-9_]{1,64}$")
+FIELD_ID = re.compile(r"[A-Za-z0-9_]{1,64}")  # whole id: always fullmatch
 
 VALUE_COLUMN: dict[ValueType, str] = {"str": "v_str", "num": "v_num", "date": "v_date", "opts": "v_opts"}
 
@@ -44,7 +44,7 @@ class FieldSpec:
     value_type: ValueType
 
     def __post_init__(self) -> None:
-        if not FIELD_ID.match(self.field_id):
+        if not FIELD_ID.fullmatch(self.field_id):
             raise ValueError(f"invalid field id: {self.field_id!r}")
 
     @property

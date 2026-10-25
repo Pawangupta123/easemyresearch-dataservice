@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     storage_mode: str = Field(default="s3", pattern="^(s3|local)$")
     aws_s3_allow_unsafe_rename: bool = False
 
+    # The DuckDB engine every read shares (storage/reader/engine.py). Unset = DuckDB's default
+    # (all cores, 80% of RAM). Size them to the host: reads beyond the memory limit spill to
+    # the temp directory instead of failing.
+    duckdb_threads: int | None = Field(default=None, ge=1)
+    duckdb_memory_limit: str | None = Field(default=None, pattern=r"^\d+(\.\d+)?\s?(KB|MB|GB|TB|KiB|MiB|GiB|TiB)$")
+    duckdb_temp_directory: str | None = None
+
     @model_validator(mode="after")
     def _refuse_unsafe_commits(self) -> "Settings":
         if self.aws_s3_allow_unsafe_rename:

@@ -26,6 +26,10 @@ jobs:
       - name: Install
         run: uv sync --locked
 
+      # The reader never downloads extensions during a read; the image (and CI) install them.
+      - name: DuckDB extensions
+        run: uv run python -m scripts.install_duckdb_extensions
+
       - name: Ruff
         run: uv run ruff check src tests probes scripts prototype && uv run ruff format --check src tests probes scripts prototype
 
