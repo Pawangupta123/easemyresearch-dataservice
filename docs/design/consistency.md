@@ -230,7 +230,10 @@ not only on acquisition.
   the drain are processed, so no wake-up is lost to `jobId` de-duplication.
 - A sweeper re-dispatches datasets whose pending operations are older than a configured age.
 - **Strict order:** only the queue's head (the lowest unfinished `seq`) runs; if it is not
-  `dispatched` yet, nothing behind it runs (the sweeper will dispatch it).
+  ready, nothing behind it runs (the sweeper dispatches a `pending` head). Ready = `dispatched`,
+  or `running` under an **older** token: its writer died before finishing (possibly before any
+  Delta commit, which reconciliation cannot see), so the new holder takes it over as the next
+  attempt and the poison limit still applies.
 - **Failing attempts:** the writer rolls back what the attempt committed (only if it committed
   anything) and reports it `failed` with `retryable` — false for a wrong payload (an
   `AppError`: retrying cannot help, the operation fails at once), true otherwise. Node puts a
@@ -238,7 +241,10 @@ not only on acquisition.
   `running` is `attempt + 1`) until `maxAttempts`.
 - **Poison operation:** once its attempts are used up Node marks it `failed`
   (`OPERATION_FAILED`, user-visible) — also when it would run again after takeovers used them
-  up — and the queue moves on.
+  up — and the queue moves on. That decision is one CAS on the operation's *current* status
+  (runnable and out of attempts), never on an earlier read, and only an operation that really
+  moved to `failed` releases its quota reservation: a late duplicate `running` arriving after
+  `committed` matches nothing and changes nothing.
 - **Lost lease:** Node's door answers any call with a stale token by fencing the writer; the
   writer stops at once without reporting the operation, and the next holder recovers it.
 

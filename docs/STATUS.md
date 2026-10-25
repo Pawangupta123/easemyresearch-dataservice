@@ -1,6 +1,6 @@
 # Status — Phase 0
 
-**As of:** 2026-10-25 · branch `feat/lease-fence` at `0254320` · nothing in production
+**As of:** 2026-10-25 · branch `feat/lease-fence` at `e03afa2` · nothing in production
 
 Phase 0 = scaffold + consistency prototype ([design/implementation-plan.md](design/implementation-plan.md),
 scenarios in [design/consistency.md §13](design/consistency.md#13-phase-0-prototype--must-pass-before-phase-1)).
@@ -8,6 +8,38 @@ Everything below was checked against the code, the tests and `git log` on 2026-1
 
 `prototype/node_side/` is the **reference implementation of Node's side** (Mongo): it proves the
 protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` never imports it.
+
+## 0. Resume here (read this first after a break or a context compaction)
+
+**Branch:** `feat/lease-fence` (dataservice) · last code commit `e03afa2` · CI green · 136 tests.
+Backend design docs live on the backend branch `docs/data-service-hybrid-edits` (last
+`2094a8ae`, **not pushed**); `docs/design/` here is an identical copy — change both together.
+
+**Scope decision (2026-10-25, user):** this service handles **data only** — storage, the one
+reader, compaction, ingest, queries — and **performance is the top priority**. Login, quota,
+edits, undo, unique-ID guard stay in Node's existing modules. `prototype/node_side/` is a
+test-only spec of Node's side: **add no more Node logic to it**; when Node builds its side it
+extends its existing modules (`records-core-quota.service`, `revision-batch-*`,
+`records-core-unique-identifier`), the scenario tests run against Node's real endpoints, and
+`prototype/node_side/` is deleted.
+
+**Next step — performance of the data path:**
+
+1. The reader today loads the **whole base** into memory (`read_base` = `select * from base`)
+   and merges in DuckDB. That cannot serve a 10 GB dataset. Rework it to push the work into
+   DuckDB / delta-rs: read only the needed columns (projection), filter / sort / page inside
+   the query, apply only the patches of the rows on the page, count without materialising.
+2. A benchmark harness on **synthetic** data (1M / 10M / 30M rows × ~50 columns) for: grid page
+   (sorted + filtered), count, patch overlay with 1k / 100k patches, compaction time and peak
+   memory — numbers recorded in this file.
+3. Then the real files (big CSV, `.sav`, `.rds`) — **ask the user for them** when step 2 is done.
+
+**Run:** Docker Desktop must be running → `docker compose up -d` (Mongo replica set on 27018);
+`uv run python -m pytest` (Windows: always `python -m`, the `.exe` launchers are blocked).
+AWS: the backend `.env` testing bucket (`AWS_S3_*`) is allowed for probes — never print keys,
+write under `dataservice-probe/<id>/`, clean up.
+
+**Commits:** branch-prefixed hooks add the emoji; no Co-Authored-By; print the branch first.
 
 ## 1. Built
 
@@ -30,13 +62,16 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 | **Publish + writer**: `OperationAuthority` contract; the writer runs `append_rows` (running → fenced commit → committed with its commit record → publish); Node's publish (idempotent, lease row written, rebase on `touchedFieldIds` + row ops, `dataVersion`, staleness for the form's analyses, event) | `storage/operations.py`, `modules/writer/service.py`, `prototype/node_side/publish_store.py`, `prototype/node_side/authority.py` | `ad351a3` |
 | **Crash recovery** on takeover: fence + reconcile, rolled-back attempts made runnable again, committed operations rolled forward (published, never re-run); Node's door refuses any writer call whose token is not the live lease | `modules/writer/service.py` (`recover`), `prototype/node_side/authority.py` | `191c255` |
 | **Queue drain + poison operations**: only the head (lowest unfinished `seq`) runs; a failing attempt rolls its own commits back and is reported retryable or not (a wrong payload fails at once); Node retries until `max_attempts`, then fails it (C6); the sweeper dispatches operations whose wake-up was lost (C5); a lost lease (`FenceError` at Node's door) stops the drain without touching the operation | `modules/writer/service.py` (`run_operation`, `drain`), `prototype/node_side/operation_store.py` | `0254320` |
+| **Entry quota** (spec of Node's side): imports reserve with their operation (no room → `QUOTA_EXCEEDED`, no operation), publish settles (re-validated if released), final failure / cancel release, the sweeper releases only for finished or vanished operations (C7), the heartbeat renews every unfinished reservation; small edits charge inserts / restores and credit deletes; abandoned `running` heads are taken over | `prototype/node_side/quota_store.py`, `operation_store.py`, `authority.py` | `e03afa2` |
 | Library-facts probe (delta-rs / DuckDB), run in CI and on push | `probes/delta_api_probe.py` | `a15a439` |
 
-### Tests (2026-10-25, `0254320`, all passing with the local Mongo up — 8 full runs in a row)
+### Tests (2026-10-25, `e03afa2`, all passing with the local Mongo up — 3 full runs in a row)
 
-**122 tests: 56 unit** (architecture 3, commit message 8, config 3, errors 7, fenced commit 7,
-health 3, mongo patches 4, reader 9, reconcile 12) and **66 integration** (C0 1, compaction 6,
-drain 6, edits 7, lease 9, operations 12, publish 9, recovery 4, undo 12). Every rule was also
+**136 tests: 56 unit** (architecture 3, commit message 8, config 3, errors 7, fenced commit 7,
+health 3, mongo patches 4, reader 9, reconcile 12) and **80 integration** (C0 1, compaction 6,
+drain 7, edits 7, lease 9, operations 12, publish 9, quota 13, recovery 4, undo 12). The quota
+work also had an **adversarial review** (3 lenses, each finding verified by a skeptic): two real
+bugs found and fixed with regression tests that failed first. Every rule was also
 **mutation-tested**: the code was broken on purpose and the matching test failed.
 
 | Scenario | Test file | Store |
@@ -48,14 +83,16 @@ drain 6, edits 7, lease 9, operations 12, publish 9, recovery 4, undo 12). Every
 | C15 | `test_publish.py` | Mongo + Delta |
 | C18, C29 | `test_lease.py` | Mongo replica set |
 | C5, C6 | `test_drain.py`, `test_operations.py` | Mongo + Delta |
+| C7 | `test_quota.py` | Mongo + Delta |
 | C28, C31 (jobs), C32 | `test_operations.py` | Mongo replica set |
 | C31 (edits), C34, C44 | `test_edits.py` | Mongo + Delta |
 | C39, C41, C42 | `test_compaction.py` | Mongo + Delta |
 
 ## 2. Not built yet
 
-**Phase 0 scenarios** still to automate: C1, C4, C7–C9, C12–C14, C16, C17, C19, C21–C27,
-C30, C33, C36–C38, C40, C43.
+**Phase 0 scenarios** still to automate: C1, C4, C8, C9, C12–C14, C16, C17, C19, C21–C27,
+C30, C33, C36–C38, C40, C43 — the Data-Service-side ones first (performance, C14, C16, C40, C43);
+Node-side ones run against Node itself once it is built (scope decision, §0).
 
 **Phase 0 features:**
 
@@ -96,6 +133,9 @@ C30, C33, C36–C38, C40, C43.
 | 2026-10-24 | Compaction would have moved `Form.dataVersion` (needless bulk-download recompute) | `dataVersion` = latest value-changing revision; compaction keeps it |
 | 2026-10-25 | A failed attempt that wrote nothing still got a fence commit from the rollback | Roll back only when the attempt has data commits since the manifest |
 | 2026-10-25 | The C18 takeover test failed about once in twenty full runs | Windows `time.monotonic()` ticks every ~15 ms (two instants compared equal) → `perf_counter()` (`61156d5`) |
+| 2026-10-25 | Review: the poison path in `running()` released a **committed** operation's reservation on a late duplicate call (decided from a stale read) | Single CASes on the current document; release only after a real move to `failed` (`e03afa2`) |
+| 2026-10-25 | Review: an operation whose writer died before its first Delta commit stayed `running` forever (reservation held, queue stuck) | A head `running` under an older token is ready for the new holder and is taken over (`e03afa2`) |
+| 2026-10-25 | `prototype/node_side/` re-implements Node logic in Python (~1,435 lines) — duplication | Scope decision (§0): no more Node logic here; Node extends its existing modules; this folder is deleted once Node passes the scenario tests |
 
 ## 4. Design decision log
 
@@ -112,3 +152,4 @@ C30, C33, C36–C38, C40, C43.
 | 2026-10-24 | `committed` stores the commit record; a new holder rolls forward without re-running |
 | 2026-10-24 | Service token: scaffold HMAC until the scoped token is built with the first internal endpoint |
 | 2026-10-25 | Failed attempts: a wrong payload (`AppError`) fails at once; anything else retries until `max_attempts` (Node config), then the operation is a poison one and the queue moves on |
+| 2026-10-25 | **Scope:** this service = data + performance; Node keeps login, quota, edits, undo in its existing modules; no new Node logic in Python |

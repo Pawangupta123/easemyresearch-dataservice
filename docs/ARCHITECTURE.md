@@ -1,6 +1,6 @@
 # Architecture
 
-**As of:** 2026-10-25 (`0254320`) · Design (source of truth): [design/](design/README.md) ·
+**As of:** 2026-10-25 (`e03afa2`) · Design (source of truth): [design/](design/README.md) ·
 Progress: [STATUS.md](STATUS.md)
 
 ## 1. Where the service sits
@@ -71,8 +71,9 @@ src/dataservice/
     ├── health/              GET /health
     └── writer/service.py    drain · run_operation (JOBS: append_rows) · recover (fence + reconcile + roll forward)
 prototype/node_side/                 REFERENCE Node logic (Mongo), ported to TypeScript in Phase 2:
-    lease_store.py · edit_store.py · undo_store.py · compaction_store.py ·
-    operation_store.py · publish_store.py · authority.py (the writer's door) · documents.py
+    lease_store.py · edit_store.py · undo_store.py · compaction_store.py · quota_store.py ·
+    operation_store.py · publish_store.py · authority.py (the writer's door) · documents.py · errors.py
+    (a test-only SPEC — no new Node logic here; deleted once Node passes the scenario tests)
 probes/c0_real_s3.py                 C0 on the real AWS test bucket (on demand, env credentials)
 probes/delta_api_probe.py            live facts about delta-rs / DuckDB
 scripts/check_commit_msg.py          commit-msg hook
