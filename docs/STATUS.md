@@ -36,8 +36,8 @@ cases old-vs-new reader: 0 differences), benchmarked on 10M synthetic rows (§1 
    file) — §2.
 3. Real files (Phase 0.2 / 0.10): **ask the user** for the largest CSV, a `.sav`, an `.rds`, an
    `.RData`, an xlsx with a codebook.
-4. Proposed to the user (waiting for a nod): start Node Phase 1 (DataStore abstraction) in
-   parallel — first a read-only audit of every Record / Q / M / D caller.
+4. Node Phase 1 (DataStore abstraction): read-only audit done — [node-phase1-audit.md](node-phase1-audit.md)
+   (107 sites, 43 files; recommended per-capability interfaces). Next: the user picks the shape.
 
 **Run:** Docker Desktop → `docker compose up -d` (Mongo replica set on 27018);
 `uv run python -m scripts.install_duckdb_extensions` once (httpfs, aws);
