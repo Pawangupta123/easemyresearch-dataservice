@@ -10,6 +10,7 @@ import pytest
 from deltalake import write_deltalake
 
 from dataservice.common.errors import ValidationError
+from dataservice.storage import reader
 from dataservice.storage.reader import Filter, Query, Sort, count, explain, merge, query, scan
 from dataservice.storage.snapshot import PATCH_SCHEMA, FieldSpec, Snapshot
 
@@ -186,3 +187,36 @@ def test_bad_requests_are_refused_as_validation_errors() -> None:
 def test_a_clear_empties_the_cell_even_if_the_patch_carries_a_value() -> None:
     patches = _patches(_patch(1, "set", "r1", "name", "null", v_str="leftover"))
     assert merge(BASE, patches, _snapshot(), Query(fields=("name",))).to_pylist()[0] == {"_rid": "r1", "f_name": None}
+
+
+PAGE_REQUESTS = (
+    Query(sort=(Sort("age", descending=True),), limit=2),  # sorted by a patched field
+    Query(fields=("name",), sort=(Sort("name"),), limit=2, offset=2),  # the inserted row on the page
+    Query(filters=(Filter("age", "ne", 41),), limit=10),
+    Query(include_deleted=True, sort=(Sort("visit"),), limit=4),
+    Query(limit=3, offset=50),  # past the end: no rows
+    Query(limit=0),
+)
+
+
+@pytest.mark.parametrize("request_", PAGE_REQUESTS)
+def test_a_page_read_in_two_passes_equals_the_one_pass_read(request_: Query, monkeypatch: pytest.MonkeyPatch) -> None:
+    two_passes = merge(BASE, EDITS, _snapshot(), request_)
+    monkeypatch.setattr(reader, "PAGE_ROWS_MAX", -1)  # every request in one pass
+    one_pass = merge(BASE, EDITS, _snapshot(), request_)
+    assert two_passes.schema == one_pass.schema and two_passes.to_pylist() == one_pass.to_pylist()
+
+
+def test_a_page_reads_only_its_own_rows_in_full(tmp_path: Path) -> None:
+    uri = str(tmp_path / "base")
+    write_deltalake(uri, BASE)
+    plan = explain(_snapshot(uri), _Source(EDITS), Query(fields=("symptoms",), sort=(Sort("visit"),), limit=2))
+    find, read = plan.split("f_symptoms", 1)
+    assert "f_visit" in find and "_rid IN" not in find  # pass 1: row id and sort column only
+    assert "(_rid IN ('r1', 'r4'))" in read  # pass 2: the Parquet scan asks for the page's rows only
+
+
+def test_a_row_id_with_a_quote_is_read_back_as_itself() -> None:
+    base = BASE.set_column(0, "_rid", pa.array(["it's", "r2", "r3", "r4", "r5"]))
+    page = merge(base, _patches(), _snapshot(), Query(fields=("age",), sort=(Sort("age"),), limit=1))
+    assert page.to_pylist() == [{"_rid": "it's", "f_age": 30.0}]
