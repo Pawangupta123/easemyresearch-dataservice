@@ -27,7 +27,7 @@ from deltalake import DeltaTable, write_deltalake
 
 from dataservice.storage.compaction import compact
 from dataservice.storage.fenced_commit import CommitContext, OpRef, max_token_seen
-from dataservice.storage.reader import Filter, Query, Sort, count, query, scan
+from dataservice.storage.reader import Filter, Query, ReaderLimits, Sort, configure, count, query, scan
 from dataservice.storage.snapshot import PATCH_SCHEMA, FieldSpec, Snapshot
 
 NUMS, STRS, DATES, OPTS = 20, 15, 10, 5
@@ -191,9 +191,12 @@ def main() -> int:
     parser.add_argument("--patches", default="0,1000,100000")
     parser.add_argument("--case")  # internal: run one case in this process
     parser.add_argument("--n", type=int, default=0)
+    parser.add_argument("--threads", type=int)  # the engine budget (Settings DUCKDB_THREADS)
+    parser.add_argument("--memory")  # e.g. 2GB (Settings DUCKDB_MEMORY_LIMIT)
     args = parser.parse_args()
     directory: Path = args.dir or Path.cwd() / ".bench" / f"rows-{args.rows}"
     if args.case:
+        configure(ReaderLimits(threads=args.threads, memory_limit=args.memory, temp_directory=str(directory / "spill")))
         print(json.dumps(run_case(directory, args.case, args.n)))
         return 0
     uri = str(directory / "base")
@@ -206,11 +209,16 @@ def main() -> int:
         print(f"built {args.rows:,} rows in {time.perf_counter() - started:.1f}s", file=sys.stderr)
     size = sum(path.stat().st_size for path in Path(uri).glob("*.parquet")) / 2**20
     counts = [int(value) for value in args.patches.split(",")]
-    print(f"\n**{args.rows:,} rows × {len(FIELDS)} fields** — {size:,.0f} MB of Parquet, {os.cpu_count()} cores\n")
+    budget = f"threads {args.threads or os.cpu_count()}, memory {args.memory or 'DuckDB default'}"
+    print(f"\n**{args.rows:,} rows × {len(FIELDS)} fields** — {size:,.0f} MB of Parquet, engine {budget}\n")
     print("| case | patches | time (best of 3) | peak memory | result |\n|---|---|---|---|---|")
     for name in CASES:
         for n in counts if name != "compaction" else counts[-1:]:
             command = [sys.executable, __file__, str(args.rows), "--dir", str(directory), "--case", name, "--n", str(n)]
+            command += [
+                *(["--threads", str(args.threads)] if args.threads else []),
+                *(["--memory", args.memory] if args.memory else []),
+            ]
             done = subprocess.run(command, capture_output=True, text=True, check=False)
             if done.returncode:
                 print(f"| {name} | {n:,} | FAILED | | {done.stderr.strip().splitlines()[-1][:120]} |")

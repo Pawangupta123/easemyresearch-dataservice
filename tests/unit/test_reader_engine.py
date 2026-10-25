@@ -41,13 +41,29 @@ def test_every_read_shares_the_configured_budget(limits: None) -> None:
     assert _setting("autoinstall_known_extensions") is False  # a read never downloads anything
 
 
-def test_a_session_setting_of_one_read_does_not_reach_another(tmp_path: Path) -> None:
+def test_a_session_setting_of_one_read_does_not_reach_another() -> None:
+    with connection() as one:
+        one.execute("SET TimeZone = 'Asia/Kolkata'")
+        assert _setting("TimeZone") == "UTC"  # another read's cursor keeps its own
+
+
+def test_a_full_stream_keeps_each_base_file_in_one_unbroken_run(tmp_path: Path) -> None:
+    """Without patches. With patches the edits join (a parallel hash join) breaks the runs into
+    ~5k-row pieces — correct rows, weaker row-id clustering after compaction (STATUS §2: compact
+    file by file)."""
     uri = str(tmp_path / "base")
-    write_deltalake(uri, pa.table({"_rid": ["r1"], "_deleted_at": pa.array([None], UTC_TS), "f_age": [1.0]}))
-    with scan(Snapshot("ds", uri, 0, 0, 0, (FieldSpec("age", "num"),)), _Source()) as reader:
-        reader.read_all()
-        assert _setting("preserve_insertion_order") is True  # the scan's own setting stayed its own
-        assert _setting("TimeZone") == "UTC"
+    ids = [f"r{n:06d}" for n in range(400_000)]
+    for start in range(0, len(ids), 50_000):  # 8 files: unordered streaming would interleave them
+        part = ids[start : start + 50_000]
+        rows = pa.table({"_rid": part, "_deleted_at": pa.array([None] * len(part), UTC_TS), "f_age": [1.0] * len(part)})
+        write_deltalake(uri, rows, mode="append")
+    with scan(Snapshot("ds", uri, 7, 0, 0, (FieldSpec("age", "num"),)), _Source(), batch_rows=5000) as reader:
+        streamed = [str(value) for value in reader.read_all().column("_rid").to_pylist()]
+    assert sorted(streamed) == ids
+    # The Delta log lists files in its own order; each file must still come through whole.
+    numbers = [int(row_id[1:]) for row_id in streamed]
+    seams = sum(1 for before, after in zip(numbers, numbers[1:], strict=False) if after != before + 1)
+    assert seams <= 7
 
 
 def test_reads_running_at_once_each_see_their_own_base(tmp_path: Path) -> None:
