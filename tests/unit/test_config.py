@@ -18,3 +18,9 @@ def test_s3_starts_without_a_lock_table() -> None:
 def test_a_short_service_secret_is_refused() -> None:
     with pytest.raises(ValidationError, match="at least 32"):
         Settings(service_token_secret="short", storage_mode="local")
+
+
+def test_a_retention_no_longer_than_the_restore_window_is_refused() -> None:
+    with pytest.raises(ValidationError, match="must exceed RESTORE_WINDOW_DAYS"):
+        Settings(service_token_secret=SECRET, storage_mode="local", delta_retention_days=30, restore_window_days=30)
+    assert Settings(service_token_secret=SECRET, storage_mode="local").delta_retention_days == 60

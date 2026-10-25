@@ -31,10 +31,25 @@ class Settings(BaseSettings):
     duckdb_memory_limit: str | None = Field(default=None, pattern=r"^\d+(\.\d+)?\s?(KB|MB|GB|TB|KiB|MiB|GiB|TiB)$")
     duckdb_temp_directory: str | None = None
 
+    # Old Delta versions (consistency.md §11): tables keep their log and removed files this long
+    # (fenced_commit.retention_configuration); it must outlast the longest pin window — an
+    # explicit dataset restore — or a pinned version could lose its log.
+    delta_retention_days: int = Field(default=60, ge=1)
+    restore_window_days: int = Field(default=30, ge=1)
+
     @model_validator(mode="after")
     def _refuse_unsafe_commits(self) -> "Settings":
         if self.aws_s3_allow_unsafe_rename:
             raise ValueError("AWS_S3_ALLOW_UNSAFE_RENAME is forbidden: concurrent commits would overwrite each other")
+        return self
+
+    @model_validator(mode="after")
+    def _refuse_pins_longer_than_retention(self) -> "Settings":
+        if self.delta_retention_days <= self.restore_window_days:
+            raise ValueError(
+                f"DELTA_RETENTION_DAYS ({self.delta_retention_days}) must exceed RESTORE_WINDOW_DAYS "
+                f"({self.restore_window_days}): a pinned revision would lose its Delta log"
+            )
         return self
 
 

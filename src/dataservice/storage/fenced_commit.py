@@ -2,7 +2,7 @@
 
 Every commit carries `txn("emr-writer", token)` plus custom metadata: `token`, and either `ops`
 (every operation it holds with its attempt — one, or a whole group commit, §4.7) or a `kind`
-(`fence`, `reconcile`). A commit without the txn would be a blind write that never conflicts
+(`fence`, `reconcile`, `vacuum`). A commit without the txn would be a blind write that never conflicts
 with a racing writer of the same app id, so no other file may call delta-rs write APIs
 (tests/unit/test_architecture.py enforces it). (A RESTORE keeps the table's latest txn, so it
 never lowers the fence; it still carries the token for the race check and the audit trail.)
@@ -102,6 +102,32 @@ def fence(table: DeltaTable, token: int) -> None:
         {FENCE_PROPERTY: str(token)},
         raise_if_not_exists=False,
         commit_properties=_properties(token, {"kind": "fence"}),
+    )
+
+
+def retention_configuration(days: int) -> dict[str, str]:
+    """The table properties every Delta table is created with (§11): old versions stay readable
+    (their log entries) and their files stay on disk for `days` — longer than any pin window,
+    because `vacuum(keep_versions)` keeps a pinned version's files but never its log."""
+    if days < 1:
+        raise ValueError("retention must be at least one day")
+    return {
+        "delta.logRetentionDuration": f"interval {days} days",
+        "delta.deletedFileRetentionDuration": f"interval {days} days",
+    }
+
+
+def vacuum(table: DeltaTable, token: int, keep_versions: Iterable[int], retention_hours: int) -> list[str]:
+    """Delete files no version within `retention_hours` uses — except those of `keep_versions`
+    (the revisions Node reports pinned: running jobs, open pagination, restore points). Fenced,
+    and never below the table's own `deletedFileRetentionDuration`. Returns the removed files."""
+    check_fence(table, token)
+    return table.vacuum(
+        retention_hours=retention_hours,
+        dry_run=False,
+        enforce_retention_duration=True,
+        keep_versions=sorted(set(keep_versions)),
+        commit_properties=_properties(token, {"kind": "vacuum"}),
     )
 
 
