@@ -1,0 +1,35 @@
+{
+  "data": {
+    "cells": [
+      {
+        "target": {
+          "field": "age",
+          "row": "6a1f000000000000000000a1"
+        },
+        "value": 31.0
+      },
+      {
+        "target": {
+          "field": "symptoms",
+          "row": "6a1f000000000000000000a3"
+        },
+        "value": null
+      }
+    ],
+    "revision": 3,
+    "rows": [
+      {
+        "_rid": "6a1f000000000000000000a1",
+        "createdBy": "6a1f000000000000000000e1",
+        "state": "live"
+      },
+      {
+        "_rid": "6a1f000000000000000000a3",
+        "createdBy": "6a1f000000000000000000e1",
+        "state": "deleted"
+      }
+    ]
+  },
+  "message": "Success",
+  "success": true
+}

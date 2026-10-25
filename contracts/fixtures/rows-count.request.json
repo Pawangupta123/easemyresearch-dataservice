@@ -1,0 +1,36 @@
+{
+  "manifest": {
+    "dataVersion": 3,
+    "fields": [
+      {
+        "fieldId": "age",
+        "valueType": "num"
+      },
+      {
+        "fieldId": "name",
+        "valueType": "str"
+      },
+      {
+        "fieldId": "seen",
+        "valueType": "date"
+      },
+      {
+        "fieldId": "symptoms",
+        "valueType": "opts"
+      }
+    ],
+    "patches": {
+      "fromSeq": 0,
+      "toSeq": 2
+    },
+    "revision": 3,
+    "rowCount": 3,
+    "tables": {
+      "base": {
+        "version": 0
+      },
+      "followups": null
+    },
+    "visitFields": []
+  }
+}

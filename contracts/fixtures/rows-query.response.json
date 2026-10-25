@@ -1,0 +1,47 @@
+{
+  "data": {
+    "revision": 3,
+    "rows": [
+      {
+        "_rid": "6a1f000000000000000000b1",
+        "createdAt": "2026-10-24T12:00:00Z",
+        "createdBy": "6a1f000000000000000000e2",
+        "updatedAt": "2026-10-24T12:00:00Z",
+        "values": {
+          "age": null,
+          "name": null,
+          "seen": null,
+          "symptoms": null
+        }
+      },
+      {
+        "_rid": "6a1f000000000000000000a2",
+        "createdAt": "2026-09-01T08:00:00Z",
+        "createdBy": "6a1f000000000000000000e2",
+        "updatedAt": "2026-09-01T08:00:00Z",
+        "values": {
+          "age": null,
+          "name": "Ravi",
+          "seen": null,
+          "symptoms": []
+        }
+      },
+      {
+        "_rid": "6a1f000000000000000000a1",
+        "createdAt": "2026-09-01T08:00:00Z",
+        "createdBy": "6a1f000000000000000000e1",
+        "updatedAt": "2026-10-24T12:00:00Z",
+        "values": {
+          "age": 31.0,
+          "name": "Asha",
+          "seen": "2026-01-05",
+          "symptoms": [
+            "6a1f0000000000000000f001"
+          ]
+        }
+      }
+    ]
+  },
+  "message": "Success",
+  "success": true
+}
