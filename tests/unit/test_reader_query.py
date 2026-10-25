@@ -36,7 +36,7 @@ WRITTEN_AT = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)  # Node stamps every patc
 def _patch(
     seq: int, op: str, row: str, field: str | None = None, t: str | None = None, **values: object
 ) -> dict[str, object]:
-    return {"seq": seq, "op": op, "row": row, "field": field, "t": t, "at": WRITTEN_AT} | {
+    return {"seq": seq, "op": op, "row": row, "follow_up": 0, "field": field, "t": t, "at": WRITTEN_AT} | {
         column: values.get(column) for column in ("v_str", "v_num", "v_date", "v_opts")
     }
 

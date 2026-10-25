@@ -38,7 +38,7 @@ BASE = pa.table(
 def _patch(
     seq: int, op: str, row: str, field: str | None = None, t: str | None = None, **values: object
 ) -> dict[str, object]:
-    return {"seq": seq, "op": op, "row": row, "field": field, "t": t, "at": AT} | {
+    return {"seq": seq, "op": op, "row": row, "follow_up": 0, "field": field, "t": t, "at": AT} | {
         column: values.get(column) for column in ("v_str", "v_num", "v_date", "v_opts")
     }
 

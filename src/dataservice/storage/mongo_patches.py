@@ -2,7 +2,7 @@
 the Data Service touches, and only to read. Node writes patches in its edit transaction.
 
 Patch document (written by Node):
-    { datasetId, seq, op, target: { row, field?, scope: { kind: "main", followUp: 0 } },
+    { datasetId, seq, op, target: { row, field?, scope: { kind: "main" | "followup", followUp } },
       value: { t, v } | null, opId, batchId, actor, at }
 """
 
@@ -13,7 +13,7 @@ import pyarrow as pa
 from pymongo.collection import Collection
 from pymongo.database import Database
 
-from dataservice.storage.snapshot import PATCH_SCHEMA, VALUE_COLUMN
+from dataservice.storage.snapshot import MAIN_VISIT, PATCH_SCHEMA, VALUE_COLUMN
 
 Document = dict[str, object]
 COLUMN_FOR_TYPE: dict[str, str] = {str(value_type): column for value_type, column in VALUE_COLUMN.items()}
@@ -42,11 +42,32 @@ def _utc(value: object) -> datetime | None:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)  # pymongo: naive UTC
 
 
+def _visit(scope: Mapping[str, object]) -> int:
+    """The visit a patch addresses: 0 for the main visit, N for follow-up visit N."""
+    kind, number = scope.get("kind"), scope.get("followUp")
+    if not isinstance(number, int) or isinstance(number, bool):
+        raise ValueError(f"patch scope without a follow-up number: {dict(scope)}")
+    if kind == "main" and number == MAIN_VISIT:
+        return MAIN_VISIT
+    if kind == "followup" and number > MAIN_VISIT:
+        return number
+    if kind == "table":
+        raise ValueError("table-field patches are legacy-only (PRD D14): a Data Service form has no table fields")
+    raise ValueError(f"unknown patch scope: {dict(scope)}")
+
+
 def to_patch_row(document: Mapping[str, object]) -> dict[str, object]:
     target, value = _as_mapping(document.get("target")), _as_mapping(document.get("value"))
     t = value.get("t")
     return (
-        {"seq": document["seq"], "op": document["op"], "row": target.get("row"), "field": target.get("field"), "t": t}
+        {
+            "seq": document["seq"],
+            "op": document["op"],
+            "row": target.get("row"),
+            "follow_up": _visit(_as_mapping(target.get("scope"))),
+            "field": target.get("field"),
+            "t": t,
+        }
         | _cell(t, value.get("v"))
         | {"at": _utc(document.get("at"))}
     )

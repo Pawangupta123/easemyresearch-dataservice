@@ -18,12 +18,14 @@ from dataservice.storage.reader.model import (
     EVERY_ROW,
     ROW_ID,
     SCAN_BATCH_ROWS,
+    VISIT,
     Filter,
     FilterOp,
     Query,
     Sort,
 )
 from dataservice.storage.reader.read import DEEP_OFFSET, PAGE_ROWS_MAX, count, explain, merge, query, read_rows, scan
+from dataservice.storage.reader.visits import merge_visits, query_visits
 
 __all__ = [
     "DEEP_OFFSET",
@@ -32,6 +34,7 @@ __all__ = [
     "PAGE_ROWS_MAX",
     "ROW_ID",
     "SCAN_BATCH_ROWS",
+    "VISIT",
     "Filter",
     "FilterOp",
     "Query",
@@ -42,7 +45,9 @@ __all__ = [
     "explain",
     "install_extensions",
     "merge",
+    "merge_visits",
     "query",
+    "query_visits",
     "read_rows",
     "scan",
 ]

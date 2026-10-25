@@ -39,6 +39,16 @@ def _same_type(actual: pa.DataType, expected: pa.DataType) -> bool:
     return bool(actual == expected)
 
 
+class _Fetched:
+    """The revision's patches, fetched once for the check and the fold."""
+
+    def __init__(self, table: pa.Table) -> None:
+        self.table = table
+
+    def patches(self, dataset_id: str, from_seq: int, to_seq: int) -> pa.Table:
+        return self.table
+
+
 def compact(snapshot: Snapshot, patch_source: PatchSource, context: CommitContext) -> CompactionResult:
     table = DeltaTable(snapshot.base_uri, storage_options=snapshot.storage_options)
     # Fence and reconcile commits carry no data; any other commit since the base means another
@@ -47,8 +57,12 @@ def compact(snapshot: Snapshot, patch_source: PatchSource, context: CommitContex
     if moved:
         raise ConflictError(f"base rewritten since version {snapshot.base_version}; re-prepare", user_safe=False)
     expected = pa.schema(table.schema().to_arrow())  # the Delta table's own schema
+    patches = _Fetched(patch_source.patches(snapshot.dataset_id, snapshot.patch_from, snapshot.patch_to))
+    if any(visit for visit in patches.table.column("follow_up").to_pylist() if visit):
+        # Publishing W would drop them: only the base is folded here, not the followups table.
+        raise ValueError("the revision has follow-up visit patches; folding the followups table is not built yet")
     written_rows = 0
-    with scan(snapshot, patch_source, include_deleted=True) as merged:
+    with scan(snapshot, patches, include_deleted=True) as merged:
         missing = set(expected.names) - set(merged.schema.names)
         if missing:
             raise ValueError(f"compaction would drop base columns {sorted(missing)}; the snapshot lists every field")

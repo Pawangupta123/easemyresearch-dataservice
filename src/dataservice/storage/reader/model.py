@@ -5,6 +5,7 @@ from typing import Literal
 
 ROW_ID = "_rid"
 DELETED_AT = "_deleted_at"
+VISIT = "_follow_up"  # the visit number of a follow-up visit row (1, 2, …)
 SCAN_BATCH_ROWS = 65_536
 
 FilterOp = Literal["eq", "ne", "lt", "le", "gt", "ge", "in", "is_null", "not_null", "contains"]

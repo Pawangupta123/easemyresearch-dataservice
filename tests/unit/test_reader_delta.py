@@ -53,7 +53,15 @@ def test_a_column_added_in_metadata_only_reads_as_empty_and_takes_patches(tmp_pa
     uri = str(tmp_path / "base")
     write_deltalake(uri, _base("r1", "r2", f_age=[1.0, 2.0]))
     DeltaTable(uri).alter.add_columns([Field("f_name", PrimitiveType("string"), nullable=True)])
-    patch: dict[str, object] = {"seq": 1, "op": "set", "row": "r2", "field": "name", "t": "str", "v_str": "Ravi"}
+    patch: dict[str, object] = {
+        "seq": 1,
+        "op": "set",
+        "row": "r2",
+        "follow_up": 0,
+        "field": "name",
+        "t": "str",
+        "v_str": "Ravi",
+    }
     patch |= {"v_num": None, "v_date": None, "v_opts": None, "at": datetime(2026, 10, 24, tzinfo=UTC)}
     rows = query(_snapshot(uri, 1, AGE, NAME, patch_to=1), _Source(pa.Table.from_pylist([patch], schema=PATCH_SCHEMA)))
     assert [row["f_name"] for row in rows.to_pylist()] == [None, "Ravi"]

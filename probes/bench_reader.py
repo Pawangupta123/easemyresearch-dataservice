@@ -73,7 +73,7 @@ def patches(rows: int, n: int) -> pa.Table:
     out: list[dict[str, object]] = []
     for seq in range(1, n + 1):
         roll, row = rng.random(), f"r{rng.randrange(rows):010d}"
-        base: dict[str, object] = {"seq": seq, "row": row, "field": None, "t": None, "at": at}
+        base: dict[str, object] = {"seq": seq, "row": row, "follow_up": 0, "field": None, "t": None, "at": at}
         values: dict[str, object] = dict.fromkeys(("v_str", "v_num", "v_date", "v_opts"))
         if roll < 0.90:
             field = rng.choice(PATCHED)

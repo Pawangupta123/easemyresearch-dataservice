@@ -19,7 +19,7 @@ import duckdb
 
 from dataservice.common.errors import ValidationError
 from dataservice.storage.reader.model import DELETED_AT, ROW_ID, Filter, Query
-from dataservice.storage.snapshot import VALUE_COLUMN, FieldSpec, Snapshot
+from dataservice.storage.snapshot import MAIN_VISIT, VALUE_COLUMN, FieldSpec, Snapshot
 
 _COMPARE = {"eq": "=", "lt": "<", "le": "<=", "gt": ">", "ge": ">="}
 _INT64 = 2**63
@@ -56,24 +56,36 @@ def specs(snapshot: Snapshot, field_ids: Sequence[str]) -> tuple[FieldSpec, ...]
 
 
 def summarise_patches(con: duckdb.DuckDBPyConnection, snapshot: Snapshot) -> Touched:
-    """`p` = the revision's patches; and what they touch."""
+    """`rp` = the revision's patches, checked; `p` = those of the main visit (base); `pv` = those
+    of follow-up visits (followups) — and what the main-visit ones touch."""
     con.execute(
-        "CREATE OR REPLACE TEMP VIEW p AS SELECT * FROM patches"
+        "CREATE OR REPLACE TEMP VIEW rp AS SELECT * FROM patches"
         f" WHERE seq > {int(snapshot.patch_from)} AND seq <= {int(snapshot.patch_to)}"
     )
-    found = con.execute(
-        "SELECT list(DISTINCT field) FILTER (WHERE op = 'set'),"
-        " count(*) FILTER (WHERE op IN ('delete_row', 'restore_row')),"
-        " count(*) FILTER (WHERE op = 'insert_row'),"
+    con.execute(f"CREATE OR REPLACE TEMP VIEW p AS SELECT * FROM rp WHERE follow_up = {MAIN_VISIT}")
+    con.execute(f"CREATE OR REPLACE TEMP VIEW pv AS SELECT * FROM rp WHERE follow_up > {MAIN_VISIT}")
+    checks = con.execute(
+        "SELECT count(*) FILTER (WHERE row IS NULL),"
+        " count(*) FILTER (WHERE follow_up IS NULL OR follow_up < 0),"
         " count(*) FILTER (WHERE op = 'delete_row' AND \"at\" IS NULL),"  # AT is a DuckDB keyword
-        " count(*) FILTER (WHERE row IS NULL) FROM p"
+        f" count(*) FILTER (WHERE follow_up > {MAIN_VISIT} AND op IN ('delete_row', 'restore_row')) FROM rp"
     ).fetchall()  # DuckDB 2.0: a result must be read to the end before the next statement
-    fields, states, inserts, untimed, unaddressed = found[0]
+    unaddressed, unscoped, untimed, visit_states = checks[0]
     if unaddressed:  # an insert of no row would add a row without an id, for good after compaction
         raise ValueError(f"{unaddressed} patch(es) without a row id")
+    if unscoped:
+        raise ValueError(f"{unscoped} patch(es) without a visit — Node writes every patch with its scope")
     if untimed:
         # Its trash time would be lost when compaction folds it into `_deleted_at` (C39).
         raise ValueError(f"{untimed} delete_row patch(es) without `at` — Node writes every patch with its time")
+    if visit_states:  # Node trashes a row with all its visits, never one visit alone
+        raise ValueError(f"{visit_states} delete / restore patch(es) on a follow-up visit")
+    found = con.execute(
+        "SELECT list(DISTINCT field) FILTER (WHERE op = 'set'),"
+        " count(*) FILTER (WHERE op IN ('delete_row', 'restore_row')),"
+        " count(*) FILTER (WHERE op = 'insert_row') FROM p"
+    ).fetchall()
+    fields, states, inserts = found[0]
     return Touched(frozenset(fields or ()), bool(states), bool(inserts))
 
 

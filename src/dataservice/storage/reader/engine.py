@@ -25,7 +25,8 @@ import pyarrow as pa
 import pyarrow.types as pa_types
 from deltalake import DeltaTable
 
-from dataservice.storage.snapshot import PATCH_SCHEMA, FieldSpec, Snapshot, ValueType
+from dataservice.storage.reader.model import ROW_ID, VISIT
+from dataservice.storage.snapshot import PATCH_SCHEMA, FieldSpec, Snapshot, TableVersion, ValueType
 
 EXTENSIONS = ("httpfs", "aws")
 _GLOB_CHARACTERS = re.compile(r"[*?\[]")
@@ -224,10 +225,15 @@ def _refuse_unreadable(table: DeltaTable) -> None:
         raise ValueError(f"base table can't be read file by file (features {sorted(blockers)} or partitions)")
 
 
-def _base_view(
-    con: duckdb.DuckDBPyConnection, source: str, present: Iterable[str], schema: pa.Schema, fields: Iterable[FieldSpec]
+def _table_view(
+    con: duckdb.DuckDBPyConnection,
+    view: str,
+    source: str,
+    present: Iterable[str],
+    schema: pa.Schema,
+    fields: Iterable[FieldSpec],
 ) -> None:
-    """`base` over `source` with every column of `schema` and every snapshot field. A field whose
+    """`view` over `source` with every column of `schema` and every snapshot field. A field whose
     type in the revision's schema (`schemaRef`) is not its column's type is refused, never cast:
     reading a revision with another revision's schema would change its values."""
     have = set(present)
@@ -242,31 +248,62 @@ def _base_view(
         raise ValueError(f"the revision's schema does not match its base: {'; '.join(clashes)}")
     wanted += [(spec.column, _FIELD_TYPE[spec.value_type]) for spec in fields if spec.column not in known]
     added = "".join(f', CAST(NULL AS {kind}) AS "{name}"' for name, kind in wanted if name not in have)
-    con.execute(f"CREATE OR REPLACE TEMP VIEW base AS SELECT *{added} FROM {source}")
+    con.execute(f"CREATE OR REPLACE TEMP VIEW {view} AS SELECT *{added} FROM {source}")
 
 
-def register_base(con: duckdb.DuckDBPyConnection, snapshot: Snapshot) -> None:
-    """`base` = the Parquet files of the pinned version, read lazily (nothing is loaded here)."""
-    table = DeltaTable(snapshot.base_uri, version=snapshot.base_version, storage_options=snapshot.storage_options)
+def _register_delta(
+    con: duckdb.DuckDBPyConnection,
+    view: str,
+    table_version: TableVersion,
+    options: Mapping[str, str],
+    fields: Iterable[FieldSpec],
+) -> None:
+    """`view` = the Parquet files of one Delta table at its pinned version, read lazily."""
+    table = DeltaTable(table_version.uri, version=table_version.version, storage_options=dict(options))
     _refuse_unreadable(table)
     schema = pa.schema(table.schema().to_arrow())
     files = [_file_path(uri) for uri in table.file_uris()]
     if not files:  # a table without rows has no files, and DuckDB can't read an empty file list
-        con.register("base_rows", schema.empty_table())
-        _base_view(con, "base_rows", schema.names, schema, snapshot.fields)
+        con.register(f"{view}_rows", schema.empty_table())
+        _table_view(con, view, f"{view}_rows", schema.names, schema, fields)
         return
     if any(path.startswith("s3://") for path in files):
         _load_s3_extensions(con)
-        con.execute(s3_secret_sql(urlparse(snapshot.base_uri).netloc, snapshot.storage_options))
+        con.execute(s3_secret_sql(urlparse(table_version.uri).netloc, options))
     source = f"read_parquet([{', '.join(_quote(path) for path in files)}], union_by_name = true)"
     present = [str(row[0]) for row in con.execute(f"DESCRIBE SELECT * FROM {source}").fetchall()]
-    _base_view(con, source, present, schema, snapshot.fields)
+    _table_view(con, view, source, present, schema, fields)
+
+
+def register_base(con: duckdb.DuckDBPyConnection, snapshot: Snapshot) -> None:
+    """`base` = the main visit's rows at the pinned version."""
+    base = TableVersion(snapshot.base_uri, snapshot.base_version)
+    _register_delta(con, "base", base, snapshot.storage_options, snapshot.fields)
+
+
+# The key of a follow-up visit row; a dataset without visits yet reads an empty table of it.
+VISIT_KEY = pa.schema([(ROW_ID, pa.string()), (VISIT, pa.int32())])
+
+
+def register_visits(con: duckdb.DuckDBPyConnection, snapshot: Snapshot) -> None:
+    """`visits` = the follow-up visit rows at the pinned version (empty when there are none)."""
+    if snapshot.followups is None:
+        con.register("visits_rows", VISIT_KEY.empty_table())
+        _table_view(con, "visits", "visits_rows", VISIT_KEY.names, VISIT_KEY, snapshot.visit_fields)
+        return
+    _register_delta(con, "visits", snapshot.followups, snapshot.storage_options, snapshot.visit_fields)
 
 
 def register_base_rows(con: duckdb.DuckDBPyConnection, rows: pa.Table, fields: Iterable[FieldSpec]) -> None:
     """`base` over rows already in memory (the pure merge)."""
     con.register("base_rows", rows)
-    _base_view(con, "base_rows", rows.schema.names, rows.schema, fields)
+    _table_view(con, "base", "base_rows", rows.schema.names, rows.schema, fields)
+
+
+def register_visit_rows(con: duckdb.DuckDBPyConnection, rows: pa.Table, fields: Iterable[FieldSpec]) -> None:
+    """`visits` over visit rows already in memory (the pure merge)."""
+    con.register("visits_rows", rows)
+    _table_view(con, "visits", "visits_rows", rows.schema.names, rows.schema, fields)
 
 
 def register_patches(con: duckdb.DuckDBPyConnection, patches: pa.Table) -> None:

@@ -1,7 +1,12 @@
 """What one published revision is, as a reader needs it (consistency.md §2, hybrid edits).
 
 A revision = the Delta tables at their manifest versions + the Mongo patches with
-`from_seq < seq ≤ to_seq`. Every reader reads both, together, through storage/reader.py.
+`from_seq < seq ≤ to_seq`. Every reader reads both, together, through storage/reader/.
+
+Two tables can hold a row's cells: `base` (the main visit) and `followups` (one row per
+follow-up visit, keyed `(_rid, _follow_up)`, created by the visit's submit — as Node's records
+do today). Table fields (mini tables) and screening are legacy-only (PRD D14): new forms have
+neither, so there is no table-field scope.
 """
 
 import re
@@ -21,12 +26,15 @@ VALUE_COLUMN: dict[ValueType, str] = {"str": "v_str", "num": "v_num", "date": "v
 # Every instant is UTC: `_deleted_at` in the Delta tables and a patch's `at`.
 UTC_TIMESTAMP = pa.timestamp("us", tz="UTC")
 
-# The shape a PatchSource returns (main-scope patches; table / follow-up scopes come later).
+MAIN_VISIT = 0  # `follow_up` of a main-visit cell; follow-up visits are 1, 2, …
+
+# The shape a PatchSource returns.
 PATCH_SCHEMA = pa.schema(
     [
         ("seq", pa.int64()),
         ("op", pa.string()),
         ("row", pa.string()),
+        ("follow_up", pa.int32()),  # 0 = the main visit (base), N = follow-up visit N (followups)
         ("field", pa.string()),  # null for row ops
         ("t", pa.string()),  # value type, or "null" for a cleared cell; null for row ops
         ("v_str", pa.string()),
@@ -53,6 +61,14 @@ class FieldSpec:
 
 
 @dataclass(frozen=True)
+class TableVersion:
+    """One Delta table of a revision at its manifest version."""
+
+    uri: str
+    version: int
+
+
+@dataclass(frozen=True)
 class Snapshot:
     dataset_id: str
     base_uri: str
@@ -61,6 +77,8 @@ class Snapshot:
     patch_to: int  # inclusive
     fields: tuple[FieldSpec, ...]
     storage_options: dict[str, str] = field(default_factory=dict)
+    followups: TableVersion | None = None  # None: the dataset has no follow-up visit yet
+    visit_fields: tuple[FieldSpec, ...] = ()  # the fields its follow-up visits capture
 
 
 class PatchSource(Protocol):
