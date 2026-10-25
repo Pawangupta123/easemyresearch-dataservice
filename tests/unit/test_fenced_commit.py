@@ -11,6 +11,7 @@ from dataservice.storage.fenced_commit import (
     CommitContext,
     OpRef,
     check_fence,
+    create,
     max_token_seen,
     parse_ops,
 )
@@ -79,3 +80,23 @@ def test_restore_writes_a_new_commit_not_the_old_version_number(tmp_path: Path) 
     restored = DeltaTable(str(tmp_path))
     assert restored.version() == 2
     assert restored.history(1)[0]["kind"] == "reconcile"
+
+
+def test_create_makes_a_fenced_table_with_its_retention_and_never_overwrites_one(tmp_path: Path) -> None:
+    uri = str(tmp_path / "table")
+    table = create(uri, _rows(3), _ctx(7), retention_days=60)
+    assert (table.version(), table.transaction_version(WRITER_APP_ID)) == (0, 7)
+    assert table.metadata().configuration == {
+        "delta.logRetentionDuration": "interval 60 days",
+        "delta.deletedFileRetentionDuration": "interval 60 days",
+    }
+    assert table.history(1)[0]["ops"] == "op-1:1"
+    with pytest.raises(Exception, match="already exists"):
+        create(uri, _rows(1), _ctx(8), retention_days=60)
+    assert DeltaTable(uri).version() == 0
+
+
+def test_create_streams_a_batch_reader(tmp_path: Path) -> None:
+    batches = [batch for chunk in (_rows(2), _rows(3)) for batch in chunk.to_batches()]
+    reader = pa.RecordBatchReader.from_batches(_rows(1).schema, batches)
+    assert create(str(tmp_path / "t"), reader, _ctx(1), retention_days=2).version() == 0

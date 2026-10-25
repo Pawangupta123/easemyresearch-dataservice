@@ -81,6 +81,29 @@ def max_token_seen(tables: Iterable[DeltaTable]) -> int:
     return max((table.transaction_version(WRITER_APP_ID) or 0 for table in tables), default=0)
 
 
+def create(
+    uri: str,
+    data: pa.Table | pa.RecordBatchReader,
+    context: CommitContext,
+    *,
+    retention_days: int,
+    storage_options: dict[str, str] | None = None,
+) -> DeltaTable:
+    """A new Delta table (a dataset's first import, §4.2): fenced from its first commit and
+    created with the retention every table carries (§11). Refuses a table that already exists —
+    a retried create must never overwrite what a first attempt wrote. A stream is written batch by
+    batch."""
+    write_deltalake(
+        uri,
+        data,
+        mode="error",
+        configuration=retention_configuration(retention_days),
+        storage_options=storage_options,
+        commit_properties=context.commit_properties(),
+    )
+    return DeltaTable(uri, storage_options=storage_options)
+
+
 def append(table: DeltaTable, data: pa.Table, context: CommitContext) -> None:
     """Append rows for the operations in `context` — fenced, never rebased onto a newer version."""
     check_fence(table, context.token)
