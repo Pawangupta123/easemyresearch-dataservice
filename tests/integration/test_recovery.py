@@ -26,7 +26,7 @@ class Cluster:
     def __init__(self, lake: Lake, db: Database[Document]) -> None:
         self.lake = lake
         self.leases = MongoLeaseStore(db, ttl_ms=60_000)
-        self.operations = MongoOperationStore(lake.client, db)
+        self.operations = MongoOperationStore(lake.client, db, max_attempts=3)
         self.authority = NodeAuthority(self.operations, MongoPublishStore(lake.client, db, self.leases), self.leases)
         self.tables = WriterTables({"base": lake.base_uri})
 
@@ -110,9 +110,8 @@ def test_a_stale_writer_that_wakes_up_can_neither_write_nor_publish(lake: Lake, 
 
     other = cluster.operations.submit(DATASET, FORM, "user-a", "import-2", "append_rows", ROWS)
     cluster.operations.dispatch(other)
-    with pytest.raises(EditRejected) as at_the_door:  # Node refuses its token before any work
+    with pytest.raises(FenceError):  # Node refuses its token before any work
         run_append_rows(DATASET, other, writer_a, cluster.tables, cluster.authority)
-    assert at_the_door.value.code == "FENCED"
     assert cluster.operations.get(other)["status"] == "dispatched"  # untouched, writer B will run it
     with pytest.raises(EditRejected) as refused:  # nor publish with its lost lease
         cluster.authority.publish(PublishRequest(other, 1, commit), writer_a)

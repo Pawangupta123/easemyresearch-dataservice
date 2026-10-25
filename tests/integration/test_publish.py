@@ -29,7 +29,7 @@ class Jobs:
     def __init__(self, lake: Lake, db: Database[Document]) -> None:
         self.lake, self.db = lake, db
         self.leases = MongoLeaseStore(db, ttl_ms=60_000)
-        self.operations = MongoOperationStore(lake.client, db)
+        self.operations = MongoOperationStore(lake.client, db, max_attempts=3)
         self.publisher = MongoPublishStore(lake.client, db, self.leases)
         self.authority = NodeAuthority(self.operations, self.publisher, self.leases)
         self.tables = WriterTables({"base": lake.base_uri})

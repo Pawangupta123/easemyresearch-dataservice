@@ -72,6 +72,13 @@ class ConflictError(AppError):
     default_message = "Conflict"
 
 
+class OperationFailedError(ConflictError):
+    """Node finished the operation as failed (its attempts ran out — a poison operation)."""
+
+    code = ErrorCode.OPERATION_FAILED
+    default_message = "The operation failed"
+
+
 class FenceError(ConflictError):
     """A newer writer has fenced this table; the current writer must stop (consistency §4.2)."""
 

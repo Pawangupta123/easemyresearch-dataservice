@@ -3,9 +3,10 @@ internal endpoints will serve (api.md §3)."""
 
 from collections.abc import Mapping
 
+from dataservice.common.errors import FenceError, OperationFailedError
 from dataservice.storage.fenced_commit import OpRef
 from dataservice.storage.lease import Lease
-from dataservice.storage.operations import Commit, CommittedOp, JobResult, Manifest, PublishRequest
+from dataservice.storage.operations import Commit, CommittedOp, JobResult, Manifest, PublishRequest, QueuedOp
 from prototype.node_side.documents import int_at
 from prototype.node_side.edit_store import EditRejected
 from prototype.node_side.lease_store import MongoLeaseStore
@@ -61,7 +62,8 @@ class NodeAuthority:
             {"datasetId": dataset_id, "token": token, "$expr": {"$gt": ["$expiresAt", "$$NOW"]}}
         )
         if not live:
-            raise EditRejected("FENCED", f"token {token} is not the current lease of {dataset_id}")
+            # The writer's own error type: it stops at once instead of failing the operation.
+            raise FenceError(f"token {token} is not the current lease of {dataset_id}", user_safe=False)
 
     def manifest(self, dataset_id: str) -> Manifest:
         db = self.operations.db
@@ -85,15 +87,26 @@ class NodeAuthority:
 
     def running(self, op_id: str, token: int) -> int:
         self._require_lease(op_id, token)
-        return self.operations.running(op_id, token)
+        try:
+            return self.operations.running(op_id, token)
+        except EditRejected as rejected:
+            if rejected.code == "OPERATION_FAILED":  # the writer's own type: it moves to the next one
+                raise OperationFailedError(str(rejected), user_safe=False) from rejected
+            raise
 
     def committed(self, op_id: str, token: int, attempt: int, commit: Commit) -> None:
         self._require_lease(op_id, token)
         self.operations.committed(op_id, token, attempt, commit.table_versions, commit_document(commit))
 
-    def failed(self, op_id: str, token: int, attempt: int, error: Mapping[str, str], rolled_back: bool) -> None:
+    def failed(self, op_id: str, token: int, attempt: int, error: Mapping[str, str], retryable: bool) -> bool:
         self._require_lease(op_id, token)
-        self.operations.failed(op_id, token, attempt, error, rolled_back)
+        return self.operations.failed(op_id, token, attempt, error, retryable)
+
+    def next_operation(self, dataset_id: str) -> QueuedOp | None:
+        head = self.operations.head(dataset_id)
+        if head is None or head.get("status") != "dispatched":
+            return None  # empty, or the head is not ready: nothing behind it may run
+        return QueuedOp(op_id=str(head["opId"]), op_type=str(head["type"]))
 
     def committed_operations(self, dataset_id: str) -> list[CommittedOp]:
         found = []

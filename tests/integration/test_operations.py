@@ -1,6 +1,8 @@
 """The Delta-job operation queue (consistency.md §5) on a real Mongo replica set — C28, C31 for
 jobs, C32, and every row of the status-machine table."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -17,7 +19,7 @@ COMMIT: Document = {"baseRevision": 1, "tableVersions": {"base": 3}}  # what a l
 @pytest.fixture
 def ops(mongo_client: MongoClient[Document], mongo_db: Database[Document]) -> MongoOperationStore:
     mongo_db["datasets"].insert_one({"_id": DATASET, "opSeq": 0})
-    return MongoOperationStore(mongo_client, mongo_db)
+    return MongoOperationStore(mongo_client, mongo_db, max_attempts=3)
 
 
 def _running(ops: MongoOperationStore, token: int = 1) -> tuple[str, int]:
@@ -73,16 +75,61 @@ def test_c28_late_callbacks_from_an_older_attempt_change_nothing(ops: MongoOpera
     with pytest.raises(EditRejected):
         ops.committed(op_id, 1, first, {"base": 3}, COMMIT)  # attempt 1's delayed committed
     with pytest.raises(EditRejected):
-        ops.failed(op_id, 1, first, {"code": "X", "message": "late"}, rolled_back=False)
+        ops.failed(op_id, 1, first, {"code": "X", "message": "late"}, retryable=False)
     op = ops.get(op_id)
     assert (op["status"], op["attempt"], op["token"]) == ("running", second, 2)
 
 
-def test_a_rolled_back_attempt_is_remembered(ops: MongoOperationStore) -> None:
+def test_a_retryable_failure_goes_back_to_the_queue_and_is_remembered(ops: MongoOperationStore) -> None:
     op_id, attempt = _running(ops, token=1)
-    ops.failed(op_id, 1, attempt, {"code": "OPERATION_FAILED", "message": "retrying"}, rolled_back=True)
+    final = ops.failed(op_id, 1, attempt, {"code": "OPERATION_FAILED", "message": "network"}, retryable=True)
     op = ops.get(op_id)
-    assert (op["status"], op["rolledBackAttempts"]) == ("rolled_back", [attempt])
+    assert (final, op["status"], op["rolledBackAttempts"]) == (False, "dispatched", [attempt])
+    assert ops.running(op_id, 1) == attempt + 1  # the retry is the next attempt
+
+
+def test_a_wrong_payload_fails_at_once(ops: MongoOperationStore) -> None:
+    op_id, attempt = _running(ops, token=1)
+    assert ops.failed(op_id, 1, attempt, {"code": "OPERATION_FAILED", "message": "bad rows"}, retryable=False)
+    assert ops.get(op_id)["status"] == "failed"
+
+
+def test_c6_a_poison_operation_is_failed_after_max_attempts(ops: MongoOperationStore) -> None:
+    op_id, attempt = _running(ops, token=1)
+    for _ in range(2):  # attempts 1 and 2 fail and go back to the queue
+        assert not ops.failed(op_id, 1, attempt, {"code": "X", "message": "flaky"}, retryable=True)
+        attempt = ops.running(op_id, 1)
+    assert ops.failed(op_id, 1, attempt, {"code": "X", "message": "flaky"}, retryable=True)  # attempt 3: final
+    assert (ops.get(op_id)["status"], attempt) == ("failed", 3)
+
+
+def test_an_operation_out_of_attempts_is_failed_when_it_would_run_again(ops: MongoOperationStore) -> None:
+    op_id, _ = _running(ops, token=1)
+    ops.running(op_id, 2)
+    ops.running(op_id, 3)  # three takeovers used three attempts
+    ops.rolled_back(op_id, 3, 4)
+    with pytest.raises(EditRejected) as refused:
+        ops.running(op_id, 4)
+    assert refused.value.code == "OPERATION_FAILED" and ops.get(op_id)["status"] == "failed"
+
+
+def test_the_queue_head_is_the_lowest_unfinished_seq(ops: MongoOperationStore) -> None:
+    first = ops.submit(DATASET, FORM, "user-a", "k1", "append_rows", PAYLOAD)
+    second = ops.submit(DATASET, FORM, "user-a", "k2", "append_rows", PAYLOAD)
+    head = ops.head(DATASET)
+    assert head is not None and head["opId"] == first
+    ops.cancel(first)
+    head = ops.head(DATASET)
+    assert head is not None and head["opId"] == second
+
+
+def test_c5_the_sweeper_dispatches_operations_whose_wake_up_was_lost(ops: MongoOperationStore) -> None:
+    op_id = ops.submit(DATASET, FORM, "user-a", "k1", "append_rows", PAYLOAD)  # crash: never dispatched
+    now = datetime.now(UTC)
+    assert ops.sweep(now, timedelta(minutes=5)) == []  # too young: the wake-up may still come
+    assert ops.sweep(now + timedelta(minutes=6), timedelta(minutes=5)) == [DATASET]
+    assert ops.get(op_id)["status"] == "dispatched"
+    assert ops.sweep(now + timedelta(minutes=6), timedelta(minutes=5)) == []  # dispatched once
 
 
 def test_c32_cancel_wins_before_committed_and_is_too_late_after(ops: MongoOperationStore) -> None:

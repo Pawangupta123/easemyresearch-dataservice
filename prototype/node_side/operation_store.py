@@ -6,13 +6,19 @@ edit) is first a durable `data_operations` document; every status change is a co
 callback from an older attempt or an older lease token can never complete, fail or publish a
 newer one (C28), and cancel races `committed` on one document (C32).
 
-Not in the prototype: payload encryption / S3 offload (§5.1) and the dispatcher + sweeper.
+The queue (§4.4): operations run strictly in `seq` order — `head` is the lowest-seq operation
+that is not finished, and nothing behind it runs first. The sweeper re-dispatches operations left
+`pending` (a crash between the insert and the wake-up, C5). A failing attempt goes back to
+`dispatched` for a retry until `max_attempts`; then it is `failed` for good (a poison operation,
+C6) and the queue moves on.
+
+Not in the prototype: payload encryption / S3 offload (§5.1) and BullMQ itself (the wake-up).
 """
 
 import hashlib
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from pymongo import MongoClient, ReturnDocument
@@ -24,6 +30,7 @@ from prototype.node_side.edit_store import EditRejected
 
 Document = dict[str, object]
 CANCELLABLE = ("held", "pending", "dispatched", "running")
+UNFINISHED = ("held", "pending", "dispatched", "running", "committed")
 
 
 def _payload_hash(op_type: str, payload: Mapping[str, object]) -> str:
@@ -31,8 +38,9 @@ def _payload_hash(op_type: str, payload: Mapping[str, object]) -> str:
 
 
 class MongoOperationStore:
-    def __init__(self, client: MongoClient[Document], database: Database[Document]) -> None:
-        self.client, self.db = client, database
+    def __init__(self, client: MongoClient[Document], database: Database[Document], max_attempts: int) -> None:
+        """`max_attempts` comes from Node's configuration (poison threshold, prd §4.8)."""
+        self.client, self.db, self.max_attempts = client, database, max_attempts
         self.ops = database["data_operations"]
         self.ops.create_index("opId", unique=True)
         self.ops.create_index([("actor", 1), ("idempotencyKey", 1)], unique=True)
@@ -107,10 +115,17 @@ class MongoOperationStore:
     def running(self, op_id: str, token: int) -> int:
         """→ running, attempt + 1. The same token again while running returns the same attempt
         (no increment); a higher token takes over a running operation (the old holder lost its
-        lease) as a new attempt; anything else is refused."""
+        lease) as a new attempt; anything else is refused. An operation that has used up its
+        attempts is failed for good instead (poison, C6)."""
         op = self.get(op_id)
         if op.get("status") == "running" and op.get("token") == token:
             return int(str(op["attempt"]))
+        if int(str(op.get("attempt", 0))) >= self.max_attempts:
+            self.ops.update_one(
+                {"opId": op_id, "status": {"$in": ["dispatched", "running"]}},
+                {"$set": {"status": "failed", "error": {"code": "OPERATION_FAILED", "message": "too many attempts"}}},
+            )
+            raise EditRejected("OPERATION_FAILED", f"operation {op_id} failed after {self.max_attempts} attempts")
         moved = self.ops.find_one_and_update(
             {
                 "opId": op_id,
@@ -143,11 +158,36 @@ class MongoOperationStore:
             "not the running attempt",
         )
 
-    def failed(self, op_id: str, token: int, attempt: int, error: Mapping[str, str], rolled_back: bool) -> None:
-        update: Document = {"status": "rolled_back" if rolled_back else "failed", "error": dict(error)}
+    def failed(self, op_id: str, token: int, attempt: int, error: Mapping[str, str], retryable: bool) -> bool:
+        """The writer gave up this attempt (and rolled its commits back). Retryable and attempts
+        left → `dispatched` again (the next `running` is attempt + 1); otherwise `failed` for good.
+        Returns True when the operation is finished."""
+        final = not retryable or attempt >= self.max_attempts
+        update: Document = {"status": "failed" if final else "dispatched", "error": dict(error)}
         self._cas(op_id, {"status": "running", "token": token, "attempt": attempt}, update, "not the running attempt")
-        if rolled_back:
+        if not final:
             self.ops.update_one({"opId": op_id}, {"$addToSet": {"rolledBackAttempts": attempt}})
+        return final
+
+    # ── the queue ────────────────────────────────────────────────────────────
+
+    def head(self, dataset_id: str) -> Document | None:
+        """The lowest-seq operation not finished yet — the only one that may run (§4.4)."""
+        return self.ops.find_one(
+            {"datasetId": dataset_id, "status": {"$in": list(UNFINISHED)}, "seq": {"$type": "number"}},
+            {"_id": 0},
+            sort=[("seq", 1)],
+        )
+
+    def sweep(self, now: datetime, stale_after: timedelta) -> list[str]:
+        """Dispatch operations left `pending` longer than `stale_after` (the wake-up was lost, C5).
+        Returns the datasets to wake."""
+        stale = list(
+            self.ops.find({"status": "pending", "createdAt": {"$lt": now - stale_after}}, {"opId": 1, "datasetId": 1})
+        )
+        for op in stale:
+            self.ops.update_one({"opId": op["opId"], "status": "pending"}, {"$set": {"status": "dispatched"}})
+        return sorted({str(op["datasetId"]) for op in stale})
 
     def committed_for(self, dataset_id: str) -> list[Document]:
         return list(self.ops.find({"datasetId": dataset_id, "status": "committed"}, {"_id": 0}))

@@ -3,6 +3,9 @@
 Node owns `data_operations` and the publish transaction and serves them on its internal
 endpoints; the writer only calls them. Implemented by the Node client in production and by the
 reference Node side (prototype/node_side) in tests — like `LeaseAuthority` for the lease.
+
+Every call is checked against the dataset's live lease; a lost lease raises `FenceError`, and
+the writer stops at once (the next holder's recovery takes over).
 """
 
 from collections.abc import Mapping
@@ -41,6 +44,12 @@ class CommittedOp:
 
 
 @dataclass(frozen=True)
+class QueuedOp:
+    op_id: str
+    op_type: str
+
+
+@dataclass(frozen=True)
 class Manifest:
     revision: int
     table_versions: Mapping[str, int]
@@ -59,6 +68,11 @@ class PublishRequest:
 class OperationAuthority(Protocol):
     def manifest(self, dataset_id: str) -> Manifest: ...
 
+    def next_operation(self, dataset_id: str) -> QueuedOp | None:
+        """The queue's head when it is ready to run (`dispatched`); None when the queue is empty or
+        its head is not ready — nothing behind the head ever runs first."""
+        ...
+
     def payload(self, op_id: str) -> Mapping[str, object]: ...
 
     def running(self, op_id: str, token: int) -> int:
@@ -67,7 +81,10 @@ class OperationAuthority(Protocol):
 
     def committed(self, op_id: str, token: int, attempt: int, commit: Commit) -> None: ...
 
-    def failed(self, op_id: str, token: int, attempt: int, error: Mapping[str, str], rolled_back: bool) -> None: ...
+    def failed(self, op_id: str, token: int, attempt: int, error: Mapping[str, str], retryable: bool) -> bool:
+        """The writer gave this attempt up and rolled its commits back. Node retries it while it is
+        retryable and attempts are left; returns True when the operation is finished (failed)."""
+        ...
 
     def committed_operations(self, dataset_id: str) -> list[CommittedOp]:
         """Operations committed but not yet published — reconciliation rolls these forward."""
