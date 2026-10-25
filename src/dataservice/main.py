@@ -9,6 +9,7 @@ from dataservice.common.auth import require_service_token
 from dataservice.common.errors import register_error_handlers
 from dataservice.config import get_settings
 from dataservice.config.logging import configure_logging
+from dataservice.modules.datasets.router import router as datasets_router
 from dataservice.modules.health.router import router as health_router
 from dataservice.storage.reader import ReaderLimits, configure
 
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="EaseMyResearch Data Service", docs_url=None, redoc_url=None, openapi_url=None)
     register_error_handlers(app)
     app.include_router(health_router, dependencies=[Depends(require_service_token)])
+    app.include_router(datasets_router)  # each route takes the scoped dataset token itself
     return app
 
 

@@ -7,3 +7,6 @@ __pycache__/
 .env
 dist/
 .bench/
+
+# Local Delta lake of the dev Data Service (LAKE_ROOT)
+.lake/

@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     delta_retention_days: int = Field(default=60, ge=1)
     restore_window_days: int = Field(default=30, ge=1)
 
+    # Where the Delta tables live: `s3://<bucket>/<prefix>` deployed, a local folder in
+    # development. A dataset's tables are under <lake_root>/datasets/<datasetId>/ (data-model §1).
+    # Unset: the /v1/datasets routes refuse to serve.
+    lake_root: str | None = None
+    # Node's Mongo, which the Data Service reads only `dataset_patches` from, read-only
+    # (consistency §1). The database name is Node's DB_NAME.
+    mongodb_url: str | None = None
+    mongodb_db: str | None = None
+
     @model_validator(mode="after")
     def _refuse_unsafe_commits(self) -> "Settings":
         if self.aws_s3_allow_unsafe_rename:
