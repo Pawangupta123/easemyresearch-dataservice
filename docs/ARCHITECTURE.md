@@ -1,6 +1,6 @@
 # Architecture
 
-**As of:** 2026-10-25 (`e03afa2`) · Design (source of truth): [design/](design/README.md) ·
+**As of:** 2026-10-25 (`3da3973`) · Design (source of truth): [design/](design/README.md) ·
 Progress: [STATUS.md](STATUS.md)
 
 ## 1. Where the service sits
@@ -39,7 +39,7 @@ Here:    router.py ─→ schemas.py ──→ service.py → repository.py → 
 | Route + Controller | `modules/<name>/router.py` | Thin: validate, call the service, return `ApiResponse[T]` via `ok(...)` |
 | DTO (Zod) | `modules/<name>/schemas.py` (Pydantic) | Request / response shapes |
 | Service | `modules/<name>/service.py` | Business logic |
-| Repository | `modules/<name>/repository.py` | Data access — reads through `storage/reader.py`, writes through `storage/fenced_commit.py` |
+| Repository | `modules/<name>/repository.py` | Data access — reads through `storage/reader/`, writes through `storage/fenced_commit.py` |
 | Model | `modules/<name>/tables.py` | Delta table definitions |
 
 Built so far: `modules/health/` (`router.py`, `schemas.py`) and `modules/writer/` (`service.py`:
@@ -65,8 +65,13 @@ src/dataservice/
 │   ├── operations.py        OperationAuthority + Commit / JobResult / PublishRequest (the job contract)
 │   ├── snapshot.py          Snapshot (base version + patch range), PatchSource, PATCH_SCHEMA
 │   ├── mongo_patches.py     MongoPatchSource: reads dataset_patches (read-only)
-│   ├── reader.py            the ONE reader: base + patches → the revision's rows
-│   └── compaction.py        fold a revision's patches into the base
+│   ├── reader/              the ONE reader: base + patches → the revision's rows
+│   │   ├── model.py         Query · Filter · Sort (what a reader may ask for)
+│   │   ├── engine.py        one shared DuckDB (budget from Settings), a cursor per read, S3 secret,
+│   │   │                    `base` = the pinned version's Parquet files as Delta defines them
+│   │   ├── sql.py           patches laid over the base in ONE join; filters (values bound, never pasted)
+│   │   └── read.py          query · count · scan (streamed) · explain · merge; one or two passes
+│   └── compaction.py        fold a revision's patches into the base (streams through scan)
 └── modules/
     ├── health/              GET /health
     └── writer/service.py    drain · run_operation (JOBS: append_rows) · recover (fence + reconcile + roll forward)
@@ -94,8 +99,8 @@ docs/                                design copy, status, this file, onboarding
 
 - no delta-rs **write** call (`write_deltalake`, `.merge(`, `.restore(`, `.vacuum(`,
   `.optimize.`, `.alter.`, delta-rs `.update(` / `.delete(` …) outside `storage/fenced_commit.py`;
-- no Delta **data read** (`QueryBuilder(`, `delta_scan`, `.to_pyarrow`, `.to_pandas(`,
-  `.to_polars(`, …) outside `storage/reader.py`;
+- no Delta **data read** (`QueryBuilder(`, `delta_scan`, `read_parquet`, `parquet_scan`,
+  `.file_uris(`, `pyarrow.parquet`, `.to_pyarrow`, `.to_pandas(`, …) outside `storage/reader/`;
 - `src/` never imports `prototype`, `tests` or `scripts`.
 
 ## 5. The single write gate and the single reader
@@ -106,11 +111,21 @@ docs/                                design copy, status, this file, onboarding
   commit when the table already carries a higher token (`FenceError`). A fence is a data-free
   `alter.set_table_properties({"emr.fence": token}, raise_if_not_exists=False)` commit; a
   rollback is a fenced `RESTORE` tagged `kind=reconcile`, `restoredTo`, `rolledBack`.
-- **Reader** (`storage/reader.py`): a revision = the Delta base at its manifest version + the
+- **Reader** (`storage/reader/`): a revision = the Delta base at its manifest version + the
   patches with `from_seq < seq ≤ to_seq` from a `PatchSource`. Rows = base ∪ `insert_row`
   patches; row state = latest `delete_row` / `restore_row` patch, else base `_deleted_at`;
   cell = latest `set` patch by `seq` (`t = "null"` clears), else base. Grid, analysis, export
   and compaction all read through it, so one revision always gives the same rows.
+- **How it stays fast at 10 GB:** DuckDB reads only the needed columns of the pinned version's
+  Parquet files (listed by the Delta log; `union_by_name`, typed NULLs for columns no file
+  holds yet); a field no patch touches is the plain column, so filters reach the Parquet scan
+  and `ORDER BY … LIMIT` fetches the other columns for the page's rows only; patched cells and
+  row state join once; a page whose full rows would meet patches, or a deep page, is read in
+  two passes (row ids first from the sort / filter columns, then only those rows in full).
+  Every read shares one engine budget (`DUCKDB_THREADS`, `DUCKDB_MEMORY_LIMIT`,
+  `DUCKDB_TEMP_DIRECTORY`); a request is validated before any I/O; extensions (`httpfs`,
+  `aws`) are installed at image build (`scripts/install_duckdb_extensions.py`), never during a
+  read. Numbers: [STATUS.md §1 Performance](STATUS.md).
 
 ## 6. Request / response envelope and errors
 

@@ -30,7 +30,7 @@ tests at a shared or production Mongo — the fixture accepts only localhost.
    (options + trade-offs when there is a real choice), and wait for a nod on design or
    infrastructure decisions.
 3. **Follow the rules:** Delta writes only through `storage/fenced_commit.py`, Delta reads only
-   through `storage/reader.py`, Mongo only `dataset_patches` read-only; no hardcoding (tunables
+   through `storage/reader/`, Mongo only `dataset_patches` read-only; no hardcoding (tunables
    in `config/settings.py`); no `Any`; mypy strict; files ≤ 300–400 lines; live-probe a
    library before relying on it.
 4. **Tests with every change:** update or add tests in the same commit and show a new test
