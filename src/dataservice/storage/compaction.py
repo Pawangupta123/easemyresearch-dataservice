@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import pyarrow as pa
 import pyarrow.types as pa_types
 from deltalake import DeltaTable
+from deltalake.exceptions import CommitFailedError
 
 from dataservice.common.errors import ConflictError
 from dataservice.storage.fenced_commit import CommitContext, overwrite
@@ -71,6 +72,9 @@ def compact(snapshot: Snapshot, patch_source: PatchSource, context: CommitContex
                 written_rows += batch.num_rows
                 yield batch.select(expected.names)
 
-        overwrite(table, pa.RecordBatchReader.from_batches(folded_schema, batches()), context)
+        try:
+            overwrite(table, pa.RecordBatchReader.from_batches(folded_schema, batches()), context)
+        except CommitFailedError as error:  # C25: a base rewrite (a transform) committed meanwhile
+            raise ConflictError("base rewritten during compaction; re-prepare", user_safe=False) from error
     written = DeltaTable(snapshot.base_uri, storage_options=snapshot.storage_options).version()
     return CompactionResult(base_version=written, folded_to=snapshot.patch_to, rows=written_rows)

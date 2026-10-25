@@ -8,8 +8,9 @@ import pyarrow as pa
 import pytest
 from deltalake import DeltaTable, write_deltalake
 
+from dataservice.common.errors import ConflictError
 from dataservice.storage.compaction import compact
-from dataservice.storage.fenced_commit import CommitContext, OpRef, max_token_seen
+from dataservice.storage.fenced_commit import CommitContext, OpRef, max_token_seen, overwrite
 from dataservice.storage.reader import Query, count, query
 from dataservice.storage.snapshot import PATCH_SCHEMA, FieldSpec, Snapshot
 
@@ -83,3 +84,43 @@ def test_a_field_with_no_base_column_is_refused_and_nothing_is_written(tmp_path:
     with pytest.raises(ValueError, match="no column in the base table"):
         compact(snapshot, _Source(EVERY_OP.slice(0, 0)), _context(uri))
     assert DeltaTable(uri).version() == 0
+
+
+def test_c25_a_base_rewrite_that_lands_during_a_compaction_wins_and_the_compaction_is_refused(
+    tmp_path: Path,
+) -> None:
+    uri = str(tmp_path / "base")
+    write_deltalake(uri, BASE)
+    transformed = BASE.set_column(2, "f_age", pa.array([300.0, 410.0, 550.0, None]))
+
+    class _TransformLandsMidway(_Source):
+        """Compaction fetches the patches inside its scan: the transform commits right then."""
+
+        def patches(self, dataset_id: str, from_seq: int, to_seq: int) -> pa.Table:
+            overwrite(DeltaTable(uri), transformed, CommitContext(1, (OpRef("transform-1", 1),), ("base",)))
+            return super().patches(dataset_id, from_seq, to_seq)
+
+    with pytest.raises(ConflictError, match="re-prepare"):
+        compact(Snapshot("ds", uri, 0, 0, 10, FIELDS), _TransformLandsMidway(EVERY_OP), _context(uri))
+    assert DeltaTable(uri).version() == 1  # only the transform's commit
+    after = query(Snapshot("ds", uri, 1, 10, 10, FIELDS), _Source(EVERY_OP), Query(include_deleted=True))
+    assert after.column("f_age").to_pylist() == [300.0, 410.0, 550.0, None]  # the transform's result intact
+    with pytest.raises(ConflictError, match="rewritten since"):  # re-preparing on the old revision is refused too
+        compact(Snapshot("ds", uri, 0, 0, 10, FIELDS), _Source(EVERY_OP), _context(uri))
+
+
+def test_c26_a_rewrite_that_folded_a_patch_is_never_patched_again(tmp_path: Path) -> None:
+    """Cell patched to 2; a transform (×10, through the one reader) makes it 20 and is published
+    with `fromSeq` = its watermark: the folded patch must not be laid over the result again."""
+    uri = str(tmp_path / "base")
+    write_deltalake(uri, BASE)
+    patched = pa.Table.from_pylist([_patch(1, "set", "r1", "age", "num", v_num=2.0)], schema=PATCH_SCHEMA)
+    revision = Snapshot("ds", uri, 0, 0, 1, FIELDS)
+    merged = query(revision, _Source(patched), Query(include_deleted=True))  # the transform reads merged values
+    ages = [None if age is None else float(str(age)) * 10 for age in merged.column("f_age").to_pylist()]
+    rewritten = merged.set_column(merged.schema.get_field_index("f_age"), "f_age", pa.array(ages, pa.float64()))
+    overwrite(DeltaTable(uri), rewritten.select(BASE.schema.names), _context(uri))
+    published = Snapshot("ds", uri, 1, 1, 1, FIELDS)  # fromSeq moved to the watermark
+    assert query(published, _Source(patched)).to_pylist()[0]["f_age"] == 20.0
+    reapplied = Snapshot("ds", uri, 1, 0, 1, FIELDS)  # what a manifest that kept fromSeq would read
+    assert query(reapplied, _Source(patched)).to_pylist()[0]["f_age"] == 2.0  # why fromSeq must move

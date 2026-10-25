@@ -11,7 +11,7 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 
 ## 0. Resume here (read this first after a break or a context compaction)
 
-**Branch:** `feat/lease-fence` (dataservice) · last code commit `f48f84e` · 212 tests (126 unit,
+**Branch:** `feat/lease-fence` (dataservice) · last code commit `f48f84e` · 214 tests (128 unit,
 86 integration). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
 `22a20996` = decisions D11–D13, **not pushed**); `docs/design/` here is an identical copy
 (synced `170e2bb`) — change both together.
@@ -29,8 +29,8 @@ cases old-vs-new reader: 0 differences), benchmarked on 10M synthetic rows (§1 
 
 **Next, in order:**
 
-1. Data-Service-side Phase 0 scenarios (C13, C14, C16, C19, C21, C40, C43 done):
-   C25 / C26 → C1 / C36 / C37 → C9 / C12 (§2). Node-side ones (C4, C8, C17, C22–C24, C27, C30, C33, C38) run
+1. Data-Service-side Phase 0 scenarios (C13, C14, C16, C19, C21, C25, C26, C40, C43 done):
+   C1 / C36 / C37 → C9 / C12 (§2). Node-side ones (C4, C8, C17, C22–C24, C27, C30, C33, C38) run
    against Node itself.
 2. Compaction file by file (keeps row-id clustering when patches exist, bounds memory to one
    file) — §2.
@@ -107,6 +107,7 @@ is **mutation-tested** (the reader: 26 of 26 mutants killed).
 | C39, C41, C42 | `test_compaction.py`, `test_compaction_stream.py` | Mongo + Delta, local Delta |
 | C13, C19, C40, C43 | `test_reads.py` | Mongo + Delta through the reader |
 | C14, C16 | `test_retention.py` | local filesystem Delta |
+| C25, C26 (Delta side: a base rewrite landing mid-compaction wins, the compaction gets `ConflictError`; a rewrite that folded a patch is read with `fromSeq` at its watermark) | `test_compaction_stream.py` | local filesystem Delta |
 | C21 (the reader's side: each revision read with its own schema; a schema that does not match its base is refused) | `test_reader_delta.py` | local filesystem Delta |
 
 ### Performance (2026-10-25, synthetic 10M rows × 50 fields = 1.1 GB Parquet, 22-core dev box)
@@ -137,8 +138,8 @@ ids across every row group of a compacted base.
 
 ## 2. Not built yet
 
-**Phase 0 scenarios** still to automate (15 of 45): C1, C4, C8, C9, C12, C17, C22–C27, C30,
-C33, C36–C38 — the Data-Service-side ones first (C25, C26, C1, C36, C37, C9, C12); C21's Node
+**Phase 0 scenarios** still to automate (13 of 45): C1, C4, C8, C9, C12, C17, C22–C24, C27,
+C30, C33, C36–C38 — the Data-Service-side ones first (C1, C36, C37, C9, C12); C21's Node
 side (the `dataset_schemas` snapshot in the publish, restore bringing the schema back) and C27
 are Node's publish transaction; Node-side ones run against Node itself once it is built (scope decision, §0).
 
