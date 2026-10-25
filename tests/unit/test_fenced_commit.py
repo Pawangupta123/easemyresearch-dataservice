@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import duckdb
 import pyarrow as pa
 import pytest
 from deltalake import DeltaTable, write_deltalake
@@ -7,12 +8,15 @@ from deltalake.exceptions import CommitFailedError
 
 from dataservice.common.errors import FenceError
 from dataservice.storage.fenced_commit import (
+    ROW_GROUP_ROWS,
     WRITER_APP_ID,
     CommitContext,
     OpRef,
+    append,
     check_fence,
     create,
     max_token_seen,
+    overwrite,
     parse_ops,
 )
 
@@ -100,3 +104,14 @@ def test_create_streams_a_batch_reader(tmp_path: Path) -> None:
     batches = [batch for chunk in (_rows(2), _rows(3)) for batch in chunk.to_batches()]
     reader = pa.RecordBatchReader.from_batches(_rows(1).schema, batches)
     assert create(str(tmp_path / "t"), reader, _ctx(1), retention_days=2).version() == 0
+
+
+def test_every_write_keeps_row_groups_small_so_reads_run_in_parallel(tmp_path: Path) -> None:
+    rows = ROW_GROUP_ROWS * 2 + 5
+    created = create(str(tmp_path / "t"), _rows(rows), _ctx(1), retention_days=2)
+    append(created, _rows(rows), _ctx(1))
+    overwrite(DeltaTable(str(tmp_path / "t")), _rows(rows), _ctx(1))
+    for version in (0, 1, 2):
+        files = [uri.replace("file:///", "") for uri in DeltaTable(str(tmp_path / "t"), version=version).file_uris()]
+        sizes = duckdb.connect().execute(f"SELECT row_group_num_rows FROM parquet_metadata({files!r})").fetchall()
+        assert max(size for (size,) in sizes) <= ROW_GROUP_ROWS, version
