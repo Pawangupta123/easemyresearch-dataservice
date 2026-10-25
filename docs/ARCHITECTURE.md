@@ -1,6 +1,6 @@
 # Architecture
 
-**As of:** 2026-10-24 (`191c255`) · Design (source of truth): [design/](design/README.md) ·
+**As of:** 2026-10-25 (`0254320`) · Design (source of truth): [design/](design/README.md) ·
 Progress: [STATUS.md](STATUS.md)
 
 ## 1. Where the service sits
@@ -69,7 +69,7 @@ src/dataservice/
 │   └── compaction.py        fold a revision's patches into the base
 └── modules/
     ├── health/              GET /health
-    └── writer/service.py    run_append_rows · recover (fence + reconcile + roll forward)
+    └── writer/service.py    drain · run_operation (JOBS: append_rows) · recover (fence + reconcile + roll forward)
 prototype/node_side/                 REFERENCE Node logic (Mongo), ported to TypeScript in Phase 2:
     lease_store.py · edit_store.py · undo_store.py · compaction_store.py ·
     operation_store.py · publish_store.py · authority.py (the writer's door) · documents.py

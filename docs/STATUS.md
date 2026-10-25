@@ -1,6 +1,6 @@
 # Status — Phase 0
 
-**As of:** 2026-10-24 · branch `feat/lease-fence` at `191c255` · nothing in production
+**As of:** 2026-10-25 · branch `feat/lease-fence` at `0254320` · nothing in production
 
 Phase 0 = scaffold + consistency prototype ([design/implementation-plan.md](design/implementation-plan.md),
 scenarios in [design/consistency.md §13](design/consistency.md#13-phase-0-prototype--must-pass-before-phase-1)).
@@ -29,13 +29,14 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 | **Delta-job operations**: `data_operations` with every status move a CAS on opId + status + token + attempt; cancel only before `committed` | `prototype/node_side/operation_store.py` | `3a2b96f` |
 | **Publish + writer**: `OperationAuthority` contract; the writer runs `append_rows` (running → fenced commit → committed with its commit record → publish); Node's publish (idempotent, lease row written, rebase on `touchedFieldIds` + row ops, `dataVersion`, staleness for the form's analyses, event) | `storage/operations.py`, `modules/writer/service.py`, `prototype/node_side/publish_store.py`, `prototype/node_side/authority.py` | `ad351a3` |
 | **Crash recovery** on takeover: fence + reconcile, rolled-back attempts made runnable again, committed operations rolled forward (published, never re-run); Node's door refuses any writer call whose token is not the live lease | `modules/writer/service.py` (`recover`), `prototype/node_side/authority.py` | `191c255` |
+| **Queue drain + poison operations**: only the head (lowest unfinished `seq`) runs; a failing attempt rolls its own commits back and is reported retryable or not (a wrong payload fails at once); Node retries until `max_attempts`, then fails it (C6); the sweeper dispatches operations whose wake-up was lost (C5); a lost lease (`FenceError` at Node's door) stops the drain without touching the operation | `modules/writer/service.py` (`run_operation`, `drain`), `prototype/node_side/operation_store.py` | `0254320` |
 | Library-facts probe (delta-rs / DuckDB), run in CI and on push | `probes/delta_api_probe.py` | `a15a439` |
 
-### Tests (2026-10-24, `191c255`, all passing with the local Mongo up; CI green)
+### Tests (2026-10-25, `0254320`, all passing with the local Mongo up — 8 full runs in a row)
 
-**111 tests: 56 unit** (architecture 3, commit message 8, config 3, errors 7, fenced commit 7,
-health 3, mongo patches 4, reader 9, reconcile 12) and **55 integration** (C0 1, compaction 6,
-edits 7, lease 9, operations 7, publish 9, recovery 4, undo 12). Every rule was also
+**122 tests: 56 unit** (architecture 3, commit message 8, config 3, errors 7, fenced commit 7,
+health 3, mongo patches 4, reader 9, reconcile 12) and **66 integration** (C0 1, compaction 6,
+drain 6, edits 7, lease 9, operations 12, publish 9, recovery 4, undo 12). Every rule was also
 **mutation-tested**: the code was broken on purpose and the matching test failed.
 
 | Scenario | Test file | Store |
@@ -46,18 +47,20 @@ edits 7, lease 9, operations 7, publish 9, recovery 4, undo 12). Every rule was 
 | C10, C11, C35 | `test_undo.py`, `test_edits.py` | Mongo + Delta through the reader |
 | C15 | `test_publish.py` | Mongo + Delta |
 | C18, C29 | `test_lease.py` | Mongo replica set |
+| C5, C6 | `test_drain.py`, `test_operations.py` | Mongo + Delta |
 | C28, C31 (jobs), C32 | `test_operations.py` | Mongo replica set |
 | C31 (edits), C34, C44 | `test_edits.py` | Mongo + Delta |
 | C39, C41, C42 | `test_compaction.py` | Mongo + Delta |
 
 ## 2. Not built yet
 
-**Phase 0 scenarios** still to automate: C1, C4–C9, C12–C14, C16, C17, C19, C21–C27, C30,
-C33, C36–C38, C40, C43.
+**Phase 0 scenarios** still to automate: C1, C4, C7–C9, C12–C14, C16, C17, C19, C21–C27,
+C30, C33, C36–C38, C40, C43.
 
 **Phase 0 features:**
 
-- Dispatcher + sweeper + poison handling; payload encryption / S3 offload; quota reservations;
+- The BullMQ wake-up (dispatcher) and the sweeper's schedule; a refused publish after `committed`
+  (C4: the drain stops and the operation stays at the head); payload encryption / S3 offload; quota reservations;
   `dataset_schemas`; field freeze; group commit for Delta jobs.
 - Reader: table and follow-up scopes, the `files` value type, child tables, caches, `_row_id`.
 - Undo of row ops (insert / delete batches); change-log trimming; retention pins + fenced vacuum;
@@ -91,6 +94,8 @@ C33, C36–C38, C40, C43.
 | 2026-10-24 | A roll-forward publish was refused: the operation was committed under the old holder's token | The request carries `commitToken`; the lease is checked against the publisher (`191c255`) |
 | 2026-10-24 | Node accepted a stale writer's `running` (only the Delta fence stopped it) | Every writer call checks the live lease at Node's door (`191c255`) |
 | 2026-10-24 | Compaction would have moved `Form.dataVersion` (needless bulk-download recompute) | `dataVersion` = latest value-changing revision; compaction keeps it |
+| 2026-10-25 | A failed attempt that wrote nothing still got a fence commit from the rollback | Roll back only when the attempt has data commits since the manifest |
+| 2026-10-25 | The C18 takeover test failed about once in twenty full runs | Windows `time.monotonic()` ticks every ~15 ms (two instants compared equal) → `perf_counter()` (`61156d5`) |
 
 ## 4. Design decision log
 
@@ -106,3 +111,4 @@ C33, C36–C38, C40, C43.
 | 2026-10-24 | Job results split `changedFieldIds` (staleness) from `touchedFieldIds` (rebase); an append conflicts with no edit |
 | 2026-10-24 | `committed` stores the commit record; a new holder rolls forward without re-running |
 | 2026-10-24 | Service token: scaffold HMAC until the scoped token is built with the first internal endpoint |
+| 2026-10-25 | Failed attempts: a wrong payload (`AppError`) fails at once; anything else retries until `max_attempts` (Node config), then the operation is a poison one and the queue moves on |

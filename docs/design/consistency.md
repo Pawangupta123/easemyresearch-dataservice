@@ -229,8 +229,18 @@ not only on acquisition.
 - Before releasing the lease the writer re-reads pending operations; any that arrived during
   the drain are processed, so no wake-up is lost to `jobId` de-duplication.
 - A sweeper re-dispatches datasets whose pending operations are older than a configured age.
-- **Poison operation:** after a configured number of failed attempts the writer rolls it back,
-  Node marks it `failed` (user-visible error), and the queue moves on.
+- **Strict order:** only the queue's head (the lowest unfinished `seq`) runs; if it is not
+  `dispatched` yet, nothing behind it runs (the sweeper will dispatch it).
+- **Failing attempts:** the writer rolls back what the attempt committed (only if it committed
+  anything) and reports it `failed` with `retryable` — false for a wrong payload (an
+  `AppError`: retrying cannot help, the operation fails at once), true otherwise. Node puts a
+  retryable one back to `dispatched` (the attempt goes into `rolledBackAttempts`; the next
+  `running` is `attempt + 1`) until `maxAttempts`.
+- **Poison operation:** once its attempts are used up Node marks it `failed`
+  (`OPERATION_FAILED`, user-visible) — also when it would run again after takeovers used them
+  up — and the queue moves on.
+- **Lost lease:** Node's door answers any call with a stale token by fencing the writer; the
+  writer stops at once without reporting the operation, and the next holder recovers it.
 
 ### 4.5 Heavy work is done outside the lease
 
@@ -357,7 +367,7 @@ unique index on `(actor, idempotencyKey)` (small edits keep the same contract in
 |---|---|---|
 | → `running` | status `dispatched`, or `running` with an expired previous token | same token while already `running` → returns the current `attempt`, **no increment** |
 | → `committed` | status `running`, same `token`, same `attempt` | same values again → 200; anything else → rejected |
-| → `failed` | status `running`, same `token`, same `attempt` | rejected for any other attempt |
+| → `failed` (or back to `dispatched`) | status `running`, same `token`, same `attempt`; `retryable` and attempts left → `dispatched`, else `failed` | rejected for any other attempt |
 | publish → `applied` | status `committed`, same `token`, same `attempt`, lease CAS (§6) | already `applied` → idempotent 200 |
 | → `cancelled` | status `held`, `pending`, `dispatched` or `running` — **not** `committed` | already `cancelled` → 200 |
 
