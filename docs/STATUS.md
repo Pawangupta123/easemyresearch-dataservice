@@ -11,7 +11,7 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 
 ## 0. Resume here (read this first after a break or a context compaction)
 
-**Branch:** `feat/lease-fence` (dataservice) · last code commit `f48f84e` · 210 tests (124 unit,
+**Branch:** `feat/lease-fence` (dataservice) · last code commit `f48f84e` · 212 tests (126 unit,
 86 integration). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
 `22a20996` = decisions D11–D13, **not pushed**); `docs/design/` here is an identical copy
 (synced `170e2bb`) — change both together.
@@ -29,8 +29,8 @@ cases old-vs-new reader: 0 differences), benchmarked on 10M synthetic rows (§1 
 
 **Next, in order:**
 
-1. Data-Service-side Phase 0 scenarios (C13, C14, C16, C19, C40, C43 done): C21 / C27 →
-   C25 / C26 → C1 / C36 / C37 (§2). Node-side ones (C4, C8, C17, C22–C24, C30, C33, C38) run
+1. Data-Service-side Phase 0 scenarios (C13, C14, C16, C19, C21, C40, C43 done):
+   C25 / C26 → C1 / C36 / C37 → C9 / C12 (§2). Node-side ones (C4, C8, C17, C22–C24, C27, C30, C33, C38) run
    against Node itself.
 2. Compaction file by file (keeps row-id clustering when patches exist, bounds memory to one
    file) — §2.
@@ -75,7 +75,7 @@ mangle backslashes on this box).
 | **Crash recovery** on takeover: fence + reconcile, rolled-back attempts made runnable again, committed operations rolled forward (published, never re-run); Node's door refuses any writer call whose token is not the live lease | `modules/writer/service.py` (`recover`), `prototype/node_side/authority.py` | `191c255` |
 | **Queue drain + poison operations**: only the head (lowest unfinished `seq`) runs; a failing attempt rolls its own commits back and is reported retryable or not (a wrong payload fails at once); Node retries until `max_attempts`, then fails it (C6); the sweeper dispatches operations whose wake-up was lost (C5); a lost lease (`FenceError` at Node's door) stops the drain without touching the operation | `modules/writer/service.py` (`run_operation`, `drain`), `prototype/node_side/operation_store.py` | `0254320` |
 | **Entry quota** (spec of Node's side): imports reserve with their operation (no room → `QUOTA_EXCEEDED`, no operation), publish settles (re-validated if released), final failure / cancel release, the sweeper releases only for finished or vanished operations (C7), the heartbeat renews every unfinished reservation; small edits charge inserts / restores and credit deletes; abandoned `running` heads are taken over | `prototype/node_side/quota_store.py`, `operation_store.py`, `authority.py` | `e03afa2` |
-| **Old versions**: fenced `vacuum` (token on VACUUM START / END, keeps the files of the versions Node reports pinned, never below the table's own file retention); `retention_configuration(days)` for every new table (log + removed files kept `DELTA_RETENTION_DAYS`, default 60); Settings refuse a retention not longer than `RESTORE_WINDOW_DAYS` (C14, C16) | `storage/fenced_commit.py`, `config/settings.py` | this commit |
+| **Old versions**: fenced `vacuum` (token on VACUUM START / END, keeps the files of the versions Node reports pinned, never below the table's own file retention); `retention_configuration(days)` for every new table (log + removed files kept `DELTA_RETENTION_DAYS`, default 60); Settings refuse a retention not longer than `RESTORE_WINDOW_DAYS` (C14, C16) | `storage/fenced_commit.py`, `config/settings.py` | `40f4f95` |
 | Library-facts probe (delta-rs / DuckDB), run in CI and on push | `probes/delta_api_probe.py` | `a15a439` |
 
 ### Tests (2026-10-25, `f48f84e`, all passing with the local Mongo up)
@@ -107,6 +107,7 @@ is **mutation-tested** (the reader: 26 of 26 mutants killed).
 | C39, C41, C42 | `test_compaction.py`, `test_compaction_stream.py` | Mongo + Delta, local Delta |
 | C13, C19, C40, C43 | `test_reads.py` | Mongo + Delta through the reader |
 | C14, C16 | `test_retention.py` | local filesystem Delta |
+| C21 (the reader's side: each revision read with its own schema; a schema that does not match its base is refused) | `test_reader_delta.py` | local filesystem Delta |
 
 ### Performance (2026-10-25, synthetic 10M rows × 50 fields = 1.1 GB Parquet, 22-core dev box)
 
@@ -136,8 +137,10 @@ ids across every row group of a compacted base.
 
 ## 2. Not built yet
 
-**Phase 0 scenarios** still to automate (16 of 45): C1, C4, C8, C9, C12, C17, C21–C27, C30,
-C33, C36–C38 — the Data-Service-side ones first (C21, C25–C27, C1, C36, C37, C9, C12); Node-side ones run against Node itself once it is built (scope decision, §0).
+**Phase 0 scenarios** still to automate (15 of 45): C1, C4, C8, C9, C12, C17, C22–C27, C30,
+C33, C36–C38 — the Data-Service-side ones first (C25, C26, C1, C36, C37, C9, C12); C21's Node
+side (the `dataset_schemas` snapshot in the publish, restore bringing the schema back) and C27
+are Node's publish transaction; Node-side ones run against Node itself once it is built (scope decision, §0).
 
 **Phase 0 features:**
 

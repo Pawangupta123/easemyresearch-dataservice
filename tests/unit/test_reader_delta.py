@@ -94,3 +94,21 @@ def test_a_table_the_files_alone_do_not_describe_is_refused(tmp_path: Path, kind
     UNREADABLE[kind](uri, _base("r1", f_age=[1.0], f_name=["a"]))
     with pytest.raises(ValueError, match="can't be read file by file"):
         query(_snapshot(uri, 0, AGE, NAME), _Source())
+
+
+def test_c21_each_revision_reads_with_its_own_schema_across_a_type_change(tmp_path: Path) -> None:
+    """A type change rewrites the column (a Delta job); a revision pinned before it still reads
+    its base version with its own `schemaRef`, the new one with the new type."""
+    uri = str(tmp_path / "base")
+    write_deltalake(uri, _base("r1", "r2", f_age=[30.0, 41.0]))  # v0: age is a number
+    write_deltalake(uri, _base("r1", "r2", f_age=["30", "41 yrs"]), mode="overwrite", schema_mode="overwrite")
+    before = query(_snapshot(uri, 0, AGE), _Source()).column("f_age").to_pylist()
+    after = query(_snapshot(uri, 1, FieldSpec("age", "str")), _Source()).column("f_age").to_pylist()
+    assert before == [30.0, 41.0] and after == ["30", "41 yrs"]
+
+
+def test_reading_a_base_with_another_revisions_schema_is_refused(tmp_path: Path) -> None:
+    uri = str(tmp_path / "base")
+    write_deltalake(uri, _base("r1", f_age=["30"]))
+    with pytest.raises(ValueError, match="age is num but its column is VARCHAR"):
+        query(_snapshot(uri, 0, AGE), _Source())

@@ -33,6 +33,13 @@ _GLOB_CHARACTERS = re.compile(r"[*?\[]")
 # read file by file. Our writer never turns them on; the reader refuses rather than misreads.
 _FILE_BY_FILE_BLOCKERS = frozenset({"deletionVectors", "columnMapping"})
 _FIELD_TYPE: dict[ValueType, str] = {"num": "DOUBLE", "str": "VARCHAR", "date": "DATE", "opts": "VARCHAR[]"}
+# The column types each field type may be stored as.
+_COLUMN_TYPES: dict[ValueType, frozenset[str]] = {
+    "num": frozenset({"DOUBLE", "FLOAT", "BIGINT", "INTEGER", "SMALLINT", "TINYINT"}),
+    "str": frozenset({"VARCHAR"}),
+    "date": frozenset({"DATE"}),
+    "opts": frozenset({"VARCHAR[]"}),
+}
 # delta-rs accepts these spellings of the AWS options; DuckDB needs one.
 _AWS_ALIASES = {
     "ACCESS_KEY_ID": "AWS_ACCESS_KEY_ID",
@@ -220,10 +227,19 @@ def _refuse_unreadable(table: DeltaTable) -> None:
 def _base_view(
     con: duckdb.DuckDBPyConnection, source: str, present: Iterable[str], schema: pa.Schema, fields: Iterable[FieldSpec]
 ) -> None:
-    """`base` over `source` with every column of `schema` and every snapshot field."""
+    """`base` over `source` with every column of `schema` and every snapshot field. A field whose
+    type in the revision's schema (`schemaRef`) is not its column's type is refused, never cast:
+    reading a revision with another revision's schema would change its values."""
     have = set(present)
     wanted = [(item.name, duckdb_type(item.type)) for item in schema]
-    known = {name for name, _ in wanted}
+    known = dict(wanted)
+    clashes = [
+        f"{spec.field_id} is {spec.value_type} but its column is {known[spec.column]}"
+        for spec in fields
+        if spec.column in known and known[spec.column] not in _COLUMN_TYPES[spec.value_type]
+    ]
+    if clashes:
+        raise ValueError(f"the revision's schema does not match its base: {'; '.join(clashes)}")
     wanted += [(spec.column, _FIELD_TYPE[spec.value_type]) for spec in fields if spec.column not in known]
     added = "".join(f', CAST(NULL AS {kind}) AS "{name}"' for name, kind in wanted if name not in have)
     con.execute(f"CREATE OR REPLACE TEMP VIEW base AS SELECT *{added} FROM {source}")
