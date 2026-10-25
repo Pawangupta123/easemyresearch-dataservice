@@ -3,7 +3,8 @@
 A request is checked before any I/O. A page whose full-width rows would meet patches (or a deep
 page) is read in two passes: pass 1 finds its row ids from the sort and filter columns alone,
 pass 2 reads only those rows in full and lays the patches over them. Otherwise one pass, where
-DuckDB itself reads the other columns for the page's rows only (late materialization).
+DuckDB itself reads the other columns for the page's rows only (late materialization). A read of
+given row ids (`Query.rids`) is one pass over just those rows.
 """
 
 from collections.abc import Generator, Sequence
@@ -15,7 +16,7 @@ import pyarrow as pa
 
 from dataservice.common.errors import ValidationError
 from dataservice.storage.reader.engine import connection, register_base, register_base_rows, register_patches
-from dataservice.storage.reader.model import DELETED_AT, EVERY_ROW, ROW_ID, SCAN_BATCH_ROWS, Query
+from dataservice.storage.reader.model import DELETED_AT, EVERY_ROW, META, ROW_ID, SCAN_BATCH_ROWS, Query
 from dataservice.storage.reader.sql import (
     PAGE_IDS,
     Params,
@@ -43,7 +44,9 @@ def query(snapshot: Snapshot, patch_source: PatchSource, request: Query = EVERY_
 
 
 def count(snapshot: Snapshot, patch_source: PatchSource, request: Query = EVERY_ROW) -> int:
-    """How many rows match `request`'s filters (its fields, sort and paging do not matter)."""
+    """How many rows match `request`'s filters (its fields, sort, paging and meta do not matter)."""
+    if request.rids is not None:
+        raise ValidationError("A count does not take row ids")
     plan = _plan(snapshot, Query(filters=request.filters, include_deleted=request.include_deleted))
     with _open(snapshot, patch_source) as con:
         merged = merged_sql(summarise_patches(con, snapshot), plan.filtered, request.include_deleted)
@@ -53,7 +56,12 @@ def count(snapshot: Snapshot, patch_source: PatchSource, request: Query = EVERY_
 
 @contextmanager
 def scan(
-    snapshot: Snapshot, patch_source: PatchSource, *, include_deleted: bool = False, batch_rows: int = SCAN_BATCH_ROWS
+    snapshot: Snapshot,
+    patch_source: PatchSource,
+    *,
+    include_deleted: bool = False,
+    meta: bool = False,
+    batch_rows: int = SCAN_BATCH_ROWS,
 ) -> Generator[pa.RecordBatchReader, None, None]:
     """Every row of the revision with every field, as a stream of batches (compaction, export):
     base rows in the base's own order, then inserted rows — so a compacted base keeps its row
@@ -62,9 +70,9 @@ def scan(
 
     Measured on 10M rows (2026-10-25): keeping the order was faster (23 s vs 25 s) and lighter
     (3.0 GB vs 4.0 GB peak) than DuckDB's unordered streaming, which scattered row ids across
-    every row group."""
+    every row group. With `meta`, also the row's meta columns (a compaction of a base that has them)."""
     with _open(snapshot, patch_source) as con:
-        sql = merged_sql(summarise_patches(con, snapshot), snapshot.fields, include_deleted)
+        sql = merged_sql(summarise_patches(con, snapshot), snapshot.fields, include_deleted, meta=meta)
         yield con.sql(sql).to_arrow_reader(batch_rows)
 
 
@@ -114,6 +122,7 @@ class _Plan:
     where: str
     params: dict[str, object]
     order: str
+    rids: tuple[str, ...] | None
 
 
 def _plan(snapshot: Snapshot, request: Query) -> _Plan:
@@ -131,11 +140,25 @@ def _plan(snapshot: Snapshot, request: Query) -> _Plan:
     column_of = {spec.field_id: spec.column for spec in sorted_by}
     order = [f'"{column_of[s.field_id]}" {"DESC" if s.descending else "ASC"} NULLS LAST' for s in request.sort]
     filtered = specs(snapshot, [f.field_id for f in request.filters])
-    return _Plan(snapshot, returned, sorted_by, filtered, condition, params.values, ", ".join([*order, f'"{ROW_ID}"']))
+    if request.row_order not in ("asc", "desc"):
+        raise ValidationError("rowOrder must be 'asc' or 'desc'")
+    order.append(f'"{ROW_ID}" {"DESC" if request.row_order == "desc" else "ASC"}')
+    rids = None if request.rids is None else _rids(request.rids)
+    return _Plan(snapshot, returned, sorted_by, filtered, condition, params.values, ", ".join(order), rids)
+
+
+def _rids(rids: Sequence[object]) -> tuple[str, ...]:
+    if len(rids) > PAGE_ROWS_MAX:
+        raise ValidationError(f"At most {PAGE_ROWS_MAX} row ids at a time")
+    if not all(isinstance(rid, str) and rid for rid in rids):
+        raise ValidationError("Row ids must be non-empty strings")
+    return tuple(str(rid) for rid in rids)  # a repeated id is still one row (a semi join)
 
 
 def _columns(plan: _Plan, request: Query) -> str:
     columns = [f'"{ROW_ID}"', *(f'"{spec.column}"' for spec in plan.returned)]
+    if request.meta:
+        columns += [f'"{name}"' for name in META]
     if request.include_deleted:
         columns.append(f'"{DELETED_AT}"')
     return ", ".join(columns)
@@ -153,21 +176,28 @@ def _two_passes(touched: Touched, plan: _Plan, request: Query) -> bool:
     if request.offset >= DEEP_OFFSET:
         return True
     wide = {spec.field_id for spec in plan.returned}
-    return touched.row_states or touched.inserts or bool(wide & touched.fields)
+    stamped = request.meta and touched.patched  # every patched row's `_updated_at` moves
+    return touched.row_states or touched.inserts or stamped or bool(wide & touched.fields)
 
 
 def _statements(con: duckdb.DuckDBPyConnection, plan: _Plan, request: Query) -> list[tuple[str, dict[str, object]]]:
     """What `query(request)` runs, in order — a page's first pass runs here to plan its second."""
     touched = summarise_patches(con, plan.snapshot)
+    every = (*plan.returned, *plan.sorted_by, *plan.filtered)
+    if plan.rids is not None:  # only the given rows: one pass over the registered ids
+        con.register(PAGE_IDS, pa.table({ROW_ID: pa.array(plan.rids, pa.string())}))
+        merged = merged_sql(touched, every, request.include_deleted, page=True, meta=request.meta)
+        one = f"SELECT {_columns(plan, request)} FROM ({merged}) m{plan.where} ORDER BY {plan.order}{_paging(request)}"
+        return [(one, plan.params)]
     if not _two_passes(touched, plan, request):
-        merged = merged_sql(touched, (*plan.returned, *plan.sorted_by, *plan.filtered), request.include_deleted)
+        merged = merged_sql(touched, every, request.include_deleted, meta=request.meta)
         one = f"SELECT {_columns(plan, request)} FROM ({merged}) m{plan.where} ORDER BY {plan.order}{_paging(request)}"
         return [(one, plan.params)]
     narrow = merged_sql(touched, (*plan.sorted_by, *plan.filtered), request.include_deleted)
     find = f'SELECT "{ROW_ID}" FROM ({narrow}) m{plan.where} ORDER BY {plan.order}{_paging(request)}'
     rows: Sequence[object] = [row[0] for row in con.execute(find, plan.params).fetchall()]
     con.register(PAGE_IDS, pa.table({ROW_ID: pa.array(rows, pa.string())}))
-    wide = merged_sql(touched, (*plan.returned, *plan.sorted_by), request.include_deleted, page=True)
+    wide = merged_sql(touched, (*plan.returned, *plan.sorted_by), request.include_deleted, page=True, meta=request.meta)
     return [(find, plan.params), (f"SELECT {_columns(plan, request)} FROM ({wide}) m ORDER BY {plan.order}", {})]
 
 

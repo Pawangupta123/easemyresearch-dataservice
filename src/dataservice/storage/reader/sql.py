@@ -5,6 +5,9 @@
              (a delete patch's `at` becomes the row's `_deleted_at`, so the trash window survives
              compaction — a delete without `at` is refused)
     cell   = the latest `set` patch of (row, field) by seq ("null" = cleared), else the base value
+    meta   = a base row's own `_created_by` / `_created_at`; an inserted row's from its insert
+             patch (`actor`, `at`); `_updated_at` = the latest of the base value and the `at` of
+             any patch of the row, in any visit (Node's updatedAt moves on every save)
 
 A field no patch touches stays the plain base column (pushdown, late materialization), and all
 the patched cells and the row state meet the base in ONE join.
@@ -18,7 +21,7 @@ from datetime import date, datetime
 import duckdb
 
 from dataservice.common.errors import ValidationError
-from dataservice.storage.reader.model import DELETED_AT, ROW_ID, Filter, Query
+from dataservice.storage.reader.model import CREATED_AT, CREATED_BY, DELETED_AT, ROW_ID, UPDATED_AT, Filter, Query
 from dataservice.storage.snapshot import MAIN_VISIT, VALUE_COLUMN, FieldSpec, Snapshot
 
 _COMPARE = {"eq": "=", "lt": "<", "le": "<=", "gt": ">", "ge": ">="}
@@ -33,6 +36,7 @@ class Touched:
     fields: frozenset[str]
     row_states: bool
     inserts: bool
+    patched: bool  # any patch at all, in any visit — it moves its row's `_updated_at`
 
 
 @dataclass
@@ -68,9 +72,10 @@ def summarise_patches(con: duckdb.DuckDBPyConnection, snapshot: Snapshot) -> Tou
         "SELECT count(*) FILTER (WHERE row IS NULL),"
         " count(*) FILTER (WHERE follow_up IS NULL OR follow_up < 0),"
         " count(*) FILTER (WHERE op = 'delete_row' AND \"at\" IS NULL),"  # AT is a DuckDB keyword
-        f" count(*) FILTER (WHERE follow_up > {MAIN_VISIT} AND op IN ('delete_row', 'restore_row')) FROM rp"
+        f" count(*) FILTER (WHERE follow_up > {MAIN_VISIT} AND op IN ('delete_row', 'restore_row')),"
+        " count(*) FROM rp"
     ).fetchall()  # DuckDB 2.0: a result must be read to the end before the next statement
-    unaddressed, unscoped, untimed, visit_states = checks[0]
+    unaddressed, unscoped, untimed, visit_states, every = checks[0]
     if unaddressed:  # an insert of no row would add a row without an id, for good after compaction
         raise ValueError(f"{unaddressed} patch(es) without a row id")
     if unscoped:
@@ -86,26 +91,39 @@ def summarise_patches(con: duckdb.DuckDBPyConnection, snapshot: Snapshot) -> Tou
         " count(*) FILTER (WHERE op = 'insert_row') FROM p"
     ).fetchall()
     fields, states, inserts = found[0]
-    return Touched(frozenset(fields or ()), bool(states), bool(inserts))
+    return Touched(frozenset(fields or ()), bool(states), bool(inserts), bool(every))
 
 
-def merged_sql(touched: Touched, fields: Sequence[FieldSpec], include_deleted: bool, page: bool = False) -> str:
+def merged_sql(
+    touched: Touched, fields: Sequence[FieldSpec], include_deleted: bool, page: bool = False, meta: bool = False
+) -> str:
     """The revision's rows with only `fields`' columns: base rows (+ inserted rows) with the
     patched cells and row states laid over them; trashed rows only with `include_deleted`;
-    with `page`, only the rows whose ids are in the registered `page_ids` table."""
+    with `page`, only the rows whose ids are in the registered `page_ids` table; with `meta`,
+    also the row's creator, creation time and last change."""
     in_page = f' WHERE "{ROW_ID}" IN (SELECT "{ROW_ID}" FROM {PAGE_IDS})'
     base = f"(SELECT * FROM base{in_page})" if page else "base"
     patched = [(index, spec) for index, spec in enumerate(fields) if spec.field_id in touched.fields]
+    main = f"follow_up = {MAIN_VISIT}"
     edits = [
         f"arg_max({{'t': t, 'v': {VALUE_COLUMN[spec.value_type]}}}, seq)"
-        f" FILTER (WHERE op = 'set' AND field = '{spec.field_id}') AS c{index}"
+        f" FILTER (WHERE op = 'set' AND {main} AND field = '{spec.field_id}') AS c{index}"
         for index, spec in patched
     ]
     if touched.row_states:
         edits.append(
-            "arg_max({'op': op, 'at': \"at\"}, seq) FILTER (WHERE op IN ('delete_row', 'restore_row')) AS last"
+            "arg_max({'op': op, 'at': \"at\"}, seq)"
+            f" FILTER (WHERE op IN ('delete_row', 'restore_row') AND {main}) AS last"
         )
-    ctes = [f"e AS (SELECT row, {', '.join(edits)} FROM p GROUP BY row)"] if edits else []
+    stamped = meta and touched.patched
+    if stamped:
+        edits.append('max("at") AS touched_at')
+        if touched.inserts:
+            edits.append(
+                f"arg_min({{'by': actor, 'at': \"at\"}}, seq) FILTER (WHERE op = 'insert_row' AND {main}) AS born"
+            )
+    # ONE grouped pass over the revision's patches (every visit: a visit's save moves `_updated_at`).
+    ctes = [f"e AS (SELECT row, {', '.join(edits)} FROM rp GROUP BY row)"] if edits else []
     if touched.inserts:
         # Inserted ids that are not base rows: the base is probed against the few inserted ids
         # (a semi join that hashes only them), never hashed itself.
@@ -126,6 +144,8 @@ def merged_sql(touched: Touched, fields: Sequence[FieldSpec], include_deleted: b
                     f" ELSE e.c{index}.v END"
                 )
             columns.append(f'{plain} AS "{spec.column}"')
+        if meta:
+            columns += _meta_columns(alias, in_base, stamped)
         joins = f' LEFT JOIN e ON e.row = {alias}."{ROW_ID}"' if edits else ""
         base_deleted_at = f'CAST({alias}."{DELETED_AT}" AS TIMESTAMPTZ)' if in_base else "CAST(NULL AS TIMESTAMPTZ)"
         deleted_at, live = base_deleted_at, f'{alias}."{DELETED_AT}" IS NULL' if in_base else "true"
@@ -145,6 +165,20 @@ def merged_sql(touched: Touched, fields: Sequence[FieldSpec], include_deleted: b
     if touched.inserts:
         sql += " UNION ALL " + rows_from("inserted", "i", False)
     return (f"WITH {', '.join(ctes)} " if ctes else "") + sql
+
+
+def _meta_columns(alias: str, in_base: bool, stamped: bool) -> list[str]:
+    """A base row keeps its own creator and creation time; a row that exists only through patches
+    takes them from its first insert patch (`e.born`, there whenever rows are inserted)."""
+    if in_base:
+        created_by = f'{alias}."{CREATED_BY}"'
+        created_at = f'CAST({alias}."{CREATED_AT}" AS TIMESTAMPTZ)'
+        updated_at = f'CAST({alias}."{UPDATED_AT}" AS TIMESTAMPTZ)'
+        if stamped:
+            updated_at = f"greatest({updated_at}, e.touched_at)"  # greatest() skips a NULL
+    else:
+        created_by, created_at, updated_at = "e.born.by", "e.born.at", "e.touched_at"
+    return [f'{created_by} AS "{CREATED_BY}"', f'{created_at} AS "{CREATED_AT}"', f'{updated_at} AS "{UPDATED_AT}"']
 
 
 def bounded(name: str, value: object) -> int:

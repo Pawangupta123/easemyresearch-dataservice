@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 
 import pyarrow as pa
+from bson import ObjectId
 from pymongo.collection import Collection
 from pymongo.database import Database
 
@@ -42,6 +43,13 @@ def _utc(value: object) -> datetime | None:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)  # pymongo: naive UTC
 
 
+def _actor(value: object) -> str | None:
+    """The user id that wrote the patch, as the 24-hex string the rows carry (`_created_by`)."""
+    if isinstance(value, ObjectId):
+        return str(value)
+    return value if isinstance(value, str) and value else None
+
+
 def _visit(scope: Mapping[str, object]) -> int:
     """The visit a patch addresses: 0 for the main visit, N for follow-up visit N."""
     kind, number = scope.get("kind"), scope.get("followUp")
@@ -69,7 +77,7 @@ def to_patch_row(document: Mapping[str, object]) -> dict[str, object]:
             "t": t,
         }
         | _cell(t, value.get("v"))
-        | {"at": _utc(document.get("at"))}
+        | {"at": _utc(document.get("at")), "actor": _actor(document.get("actor"))}
     )
 
 
@@ -80,6 +88,6 @@ class MongoPatchSource:
     def patches(self, dataset_id: str, from_seq: int, to_seq: int) -> pa.Table:
         cursor = self.patches_collection.find(
             {"datasetId": dataset_id, "seq": {"$gt": from_seq, "$lte": to_seq}},
-            {"_id": 0, "seq": 1, "op": 1, "target": 1, "value": 1, "at": 1},
+            {"_id": 0, "seq": 1, "op": 1, "target": 1, "value": 1, "at": 1, "actor": 1},
         ).sort("seq", 1)
         return pa.Table.from_pylist([to_patch_row(document) for document in cursor], schema=PATCH_SCHEMA)

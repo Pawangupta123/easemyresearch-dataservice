@@ -42,6 +42,7 @@ PATCH_SCHEMA = pa.schema(
         ("v_date", pa.date32()),
         ("v_opts", pa.list_(pa.string())),
         ("at", UTC_TIMESTAMP),  # when Node wrote it — a delete's time feeds the trash window
+        ("actor", pa.string()),  # the user id that wrote it — an inserted row's creator
     ]
 )
 

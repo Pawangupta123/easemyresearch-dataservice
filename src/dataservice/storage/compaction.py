@@ -21,6 +21,7 @@ from deltalake.exceptions import CommitFailedError
 from dataservice.common.errors import ConflictError
 from dataservice.storage.fenced_commit import CommitContext, overwrite
 from dataservice.storage.reader import scan
+from dataservice.storage.reader.model import META
 from dataservice.storage.reconcile import data_commits_after
 from dataservice.storage.snapshot import PatchSource, Snapshot
 
@@ -62,7 +63,10 @@ def compact(snapshot: Snapshot, patch_source: PatchSource, context: CommitContex
         # Publishing W would drop them: only the base is folded here, not the followups table.
         raise ValueError("the revision has follow-up visit patches; folding the followups table is not built yet")
     written_rows = 0
-    with scan(snapshot, patches, include_deleted=True) as merged:
+    # The row's meta columns travel with the rows (a base that has them keeps them, with an
+    # `_updated_at` the folded patches moved); one without them stays without.
+    meta = bool(set(META) & set(expected.names))
+    with scan(snapshot, patches, include_deleted=True, meta=meta) as merged:
         missing = set(expected.names) - set(merged.schema.names)
         if missing:
             raise ValueError(f"compaction would drop base columns {sorted(missing)}; the snapshot lists every field")

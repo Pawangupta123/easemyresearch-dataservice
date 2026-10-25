@@ -25,7 +25,7 @@ import pyarrow as pa
 import pyarrow.types as pa_types
 from deltalake import DeltaTable
 
-from dataservice.storage.reader.model import ROW_ID, VISIT
+from dataservice.storage.reader.model import CREATED_AT, CREATED_BY, ROW_ID, UPDATED_AT, VISIT
 from dataservice.storage.snapshot import PATCH_SCHEMA, FieldSpec, Snapshot, TableVersion, ValueType
 
 EXTENSIONS = ("httpfs", "aws")
@@ -41,6 +41,13 @@ _COLUMN_TYPES: dict[ValueType, frozenset[str]] = {
     "date": frozenset({"DATE"}),
     "opts": frozenset({"VARCHAR[]"}),
 }
+# The row's meta columns of a base table: (name, the types it may be stored as; the first is the
+# type of the typed NULL column a base without it reads).
+_META_TYPES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (CREATED_BY, ("VARCHAR",)),
+    (CREATED_AT, ("TIMESTAMPTZ", "TIMESTAMP")),
+    (UPDATED_AT, ("TIMESTAMPTZ", "TIMESTAMP")),
+)
 # delta-rs accepts these spellings of the AWS options; DuckDB needs one.
 _AWS_ALIASES = {
     "ACCESS_KEY_ID": "AWS_ACCESS_KEY_ID",
@@ -232,10 +239,12 @@ def _table_view(
     present: Iterable[str],
     schema: pa.Schema,
     fields: Iterable[FieldSpec],
+    meta: bool = False,
 ) -> None:
-    """`view` over `source` with every column of `schema` and every snapshot field. A field whose
-    type in the revision's schema (`schemaRef`) is not its column's type is refused, never cast:
-    reading a revision with another revision's schema would change its values."""
+    """`view` over `source` with every column of `schema`, every snapshot field and — with
+    `meta`, for a base — the row's meta columns. A field whose type in the revision's schema
+    (`schemaRef`) is not its column's type is refused, never cast: reading a revision with
+    another revision's schema would change its values. So is a meta column of another type."""
     have = set(present)
     wanted = [(item.name, duckdb_type(item.type)) for item in schema]
     known = dict(wanted)
@@ -244,9 +253,12 @@ def _table_view(
         for spec in fields
         if spec.column in known and known[spec.column] not in _COLUMN_TYPES[spec.value_type]
     ]
+    columns = _META_TYPES if meta else ()
+    clashes += [f"{name} is {known[name]}" for name, kinds in columns if name in known and known[name] not in kinds]
     if clashes:
         raise ValueError(f"the revision's schema does not match its base: {'; '.join(clashes)}")
     wanted += [(spec.column, _FIELD_TYPE[spec.value_type]) for spec in fields if spec.column not in known]
+    wanted += [(name, kinds[0]) for name, kinds in columns if name not in known]
     added = "".join(f', CAST(NULL AS {kind}) AS "{name}"' for name, kind in wanted if name not in have)
     con.execute(f"CREATE OR REPLACE TEMP VIEW {view} AS SELECT *{added} FROM {source}")
 
@@ -257,6 +269,7 @@ def _register_delta(
     table_version: TableVersion,
     options: Mapping[str, str],
     fields: Iterable[FieldSpec],
+    meta: bool = False,
 ) -> None:
     """`view` = the Parquet files of one Delta table at its pinned version, read lazily."""
     table = DeltaTable(table_version.uri, version=table_version.version, storage_options=dict(options))
@@ -265,20 +278,20 @@ def _register_delta(
     files = [_file_path(uri) for uri in table.file_uris()]
     if not files:  # a table without rows has no files, and DuckDB can't read an empty file list
         con.register(f"{view}_rows", schema.empty_table())
-        _table_view(con, view, f"{view}_rows", schema.names, schema, fields)
+        _table_view(con, view, f"{view}_rows", schema.names, schema, fields, meta)
         return
     if any(path.startswith("s3://") for path in files):
         _load_s3_extensions(con)
         con.execute(s3_secret_sql(urlparse(table_version.uri).netloc, options))
     source = f"read_parquet([{', '.join(_quote(path) for path in files)}], union_by_name = true)"
     present = [str(row[0]) for row in con.execute(f"DESCRIBE SELECT * FROM {source}").fetchall()]
-    _table_view(con, view, source, present, schema, fields)
+    _table_view(con, view, source, present, schema, fields, meta)
 
 
 def register_base(con: duckdb.DuckDBPyConnection, snapshot: Snapshot) -> None:
     """`base` = the main visit's rows at the pinned version."""
     base = TableVersion(snapshot.base_uri, snapshot.base_version)
-    _register_delta(con, "base", base, snapshot.storage_options, snapshot.fields)
+    _register_delta(con, "base", base, snapshot.storage_options, snapshot.fields, meta=True)
 
 
 # The key of a follow-up visit row; a dataset without visits yet reads an empty table of it.
@@ -297,7 +310,7 @@ def register_visits(con: duckdb.DuckDBPyConnection, snapshot: Snapshot) -> None:
 def register_base_rows(con: duckdb.DuckDBPyConnection, rows: pa.Table, fields: Iterable[FieldSpec]) -> None:
     """`base` over rows already in memory (the pure merge)."""
     con.register("base_rows", rows)
-    _table_view(con, "base", "base_rows", rows.schema.names, rows.schema, fields)
+    _table_view(con, "base", "base_rows", rows.schema.names, rows.schema, fields, meta=True)
 
 
 def register_visit_rows(con: duckdb.DuckDBPyConnection, rows: pa.Table, fields: Iterable[FieldSpec]) -> None:
