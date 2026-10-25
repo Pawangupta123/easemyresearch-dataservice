@@ -1,7 +1,7 @@
 # Data Service — APIs
 
 **Status:** Proposed · not built
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Back to:** [tech-design.md](tech-design.md) · [consistency.md](consistency.md) · [data-model.md](data-model.md)
 
 Three layers: the **public API** on Node (the FE only ever talks to Node), the **internal API**
@@ -42,7 +42,7 @@ retrying with the key returns the committed edit or picks the operation up
 | `DELETE /forms/:formId/records/:recordId` · `DELETE /forms/:formId/records/bulk-delete` | Small edit: `delete_row` patches (bulk delete ≤ 100 ids today) |
 | `PATCH /forms/:formId/records/restore` · `GET /forms/:formId/records/deleted` | Restore from trash: `restore_row` patches, counted against quota like an insert (a selection above the cap → `restore_rows` Delta job) · trash list |
 | `GET /forms/:formId/records/check-unique` | Checked through the reader against the current revision; the edit transaction re-checks (claims + reader, [consistency §14.4](consistency.md#144-unique-identifier)) |
-| `POST /forms/:formId/records/import` | An append Delta job (operation); large files use §1.2–1.3 |
+| `POST /forms/:formId/records/import` | An append Delta job (operation); detection and validation run in the Data Service (§2.5), not in Node's import module, which keeps serving `mongo` forms (PRD D11–D12); large files use §1.2–1.3 |
 | `POST /forms/:formId/columns` · `POST /forms/:formId/fields/toggle-hidden` | Column add = schema change applied in the publish transaction · display only |
 | `GET /forms/:formId/export-records` | Becomes an `export` **job** for large datasets (returns job id; file link when done) |
 | `GET /revisions/batches` · `GET /revisions/batches/:mutationId/restore-preview` · `POST /revisions/batches/:mutationId/restore` | Batch = `dataset_changes.batchId` (`≡ mutationId`); same response shapes, per-cell undo; the restore is a small edit ([consistency §8.2](consistency.md#82-todays-contracts-on-the-change-log)) |
@@ -61,9 +61,9 @@ retrying with the key returns the committed edit or picks the operation up
 
 | Method · Path | Purpose |
 |---|---|
-| `POST /datasets` | `{ uploadId, formName, options: { delimiter?, encoding?, sheet?, rObject?, codebookUploadId? } }` → creates form (`storage: 'dataservice'`) + dataset, starts the read-only **detect** job |
-| `GET /datasets/:datasetId/preview` | Detected schema: columns, types, value labels, corrections, notices (same shape as today's import preview) |
-| `POST /datasets/:datasetId/confirm` | Final column types/options (same body as today's import confirm) → starts the **ingest** job |
+| `POST /datasets` | `{ uploadId, formName, options: { delimiter?, encoding?, sheet?, rObject?, codebookUploadId? } }` → creates form (`storage: 'dataservice'`) + dataset, starts the read-only **detect** job (stages the upload to Parquet, classifies every distinct value — [tech design §7.1](tech-design.md#71-import-and-type-detection-new-forms)) |
+| `GET /datasets/:datasetId/preview` | Detected schema from the Data Service's value maps: columns, types, value labels, corrections, notices (same shape as today's import preview) |
+| `POST /datasets/:datasetId/confirm` | Final column types/options (same body as today's import confirm). Node checks auth, Zod shape and quota, calls `:validate` (§2.5) and persists exactly the returned form draft to `forms`, then starts the **ingest** job; issues come back with today's message text and nothing starts |
 | `GET /datasets/:datasetId` | Status, row count, current revision, storage bytes |
 | `GET /datasets/:datasetId/revisions` | User-facing history (kinds other than `edit` and `compact`: ingest, transform, clean, restore, …) |
 | `POST /datasets/:datasetId/revisions/:revision/restore` | Explicit whole-dataset restore (new revision, audited, confirmation required; only inside the retention window). Not used for undo |
@@ -160,8 +160,9 @@ string-concatenated into SQL.
 
 Job types: `ingest`, `compact`, `transform`, `clean`, `bulk_edit`, `bulk_delete`,
 `restore_rows`, `column_archive`, `column_restore`, `type_migration`, `reindex_unique`,
-`derived_recompute`, `export`, `vacuum`, `purge` — every one that writes data carries an
-`opId` and publishes through §3. Plus the read-only `detect` (upload preview).
+`export`, `vacuum`, `purge` — every one that writes data carries an `opId` and publishes
+through §3. Plus the read-only `detect` (upload preview). There is no derived-recompute job:
+derived columns are computed at read ([tech design §7.2](tech-design.md#72-derived-fields-new-forms)).
 
 ### 2.4 Job callbacks (Data Service → Node) — progress only
 
@@ -190,6 +191,20 @@ its operation becomes `applied`. `POST /api/v2/jobs/:id/cancel` is a CAS on the 
 wins only before `committed` (the writer then rolls back and the reservation is released);
 after that it returns `409 TOO_LATE` and the job finishes as `succeeded`
 ([consistency §5.2](consistency.md#52-status-machine)).
+
+### 2.5 Import validation
+
+Synchronous, called by Node on `POST /datasets/:datasetId/confirm` (§1.3) and on an append
+import into a `dataservice` form. It reads the staged Parquet and the value maps of the
+`detect` job — no published revision exists yet for a first import
+([tech design §7.1](tech-design.md#71-import-and-type-detection-new-forms)).
+
+| Method · Path | Body | Returns |
+|---|---|---|
+| `POST /v1/datasets/{id}:validate` | `{ uploadId, fields }` — the user's edited fields (today's confirm body) | `{ issues: [{ column, message }], fields, draft }` — `issues` with today's message text; `fields` normalized; `draft` = the final form draft (types, deduped + ordered options, correction map) that Node persists to `forms` as is and the `ingest` job casts by |
+
+Node keeps no thresholds or option logic for new forms; it adds auth, Zod shape, quota and job
+status / cancel around this call.
 
 ## 3. Internal API — Data Service → Node (writer endpoints)
 

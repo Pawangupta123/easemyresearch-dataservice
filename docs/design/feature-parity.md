@@ -1,7 +1,7 @@
 # Data Service — Feature Parity
 
 **Status:** Proposed · not built
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Back to:** [prd.md](prd.md) · [tech-design.md](tech-design.md) · [consistency.md](consistency.md) · [implementation-plan.md](implementation-plan.md)
 
 Decision D7: **every feature that works on a `mongo` form today works on a `dataservice`
@@ -15,6 +15,11 @@ re-checked against `src/v2` on 2026-10-24. Every write on the Data Service publi
 durable Delta-job operation that Node publishes ([consistency §5–§6](consistency.md#5-durable-operations));
 every read goes through the Data Service's one reader ([consistency §15](consistency.md#15-one-reader-and-compaction)).
 Rows marked **Δ** change behaviour on purpose.
+
+The "today" code keeps serving `mongo` forms unchanged and frozen — it is the legacy store's
+code, not duplication to remove (PRD D11). For `dataservice` forms the Data Service owns import,
+type detection, validation and derived fields (PRD D12,
+[tech design §7.1–§7.2](tech-design.md#7-import-derived-fields-transforms-and-cleaning)).
 
 ---
 
@@ -35,12 +40,14 @@ the scope is part of every cache key ([consistency §12](consistency.md#12-cache
 
 | Feature | Today (Mongo) | On the Data Service | Phase |
 |---|---|---|---|
+| Import (upload → preview → confirm) | Node import module (`src/v2/modules/import`): Excel ≤ 10 MB, preview, confirm, BullMQ import worker | every format in the Data Service: staged once to Parquet, `detect` → preview, confirm → synchronous `:validate` → Node persists the returned form draft → `ingest` casts by the same value map (preview = committed) ([api §2.5](api.md#25-import-validation)) | 2 (xlsx / CSV / Parquet) / 4 (`.sav` / `.rds`) |
+| Type detection, MCQ / typo / ordinal suggestions, notices | Node helpers (`import-type-*.helper.ts`, `import-column-stats.helper.ts`, `import-options-canonical.helper.ts`), optional AI refine | Python only: one classifier per **distinct** value of each column (DuckDB `GROUP BY value`, count) → value map; suggestions, notices and the AI refine from it. Node's rules are the reference for golden vectors, not a second engine | 2 |
 | CRF form submit, add empty row | `M.createRecord` | small edit: `insert_row` + `set` patches in one edit transaction | 3 |
 | Cell / row edit | merge + `M.updateRecordDataForUser` (replaces the whole `data` array — a concurrent bulk edit + row edit can drop one) | **Δ** cell-level patches in one edit transaction; concurrent edits serialize on the revision CAS; different cells never collide; same cell = the later commit wins, earlier value kept in history + undo ([consistency §4.7](consistency.md#47-many-users-on-one-dataset), [§14.3](consistency.md#143-concurrency--edits-serialize-on-the-revision)) | 3 |
 | Follow-ups (submit / read / schedule) | entries with `followUpNumber` in the record | `followups` child table; patches with target `scope.followUp` ([consistency §9](consistency.md#9-cell-addressing-and-values)) | 3 |
 | Table fields (sub-rows) | entries with `rowIndex`, `parentFieldId` | `table_<fieldId>` child table; target `parentField + rowIndex + followUp` | 3 |
 | File-type fields | **array** of S3 URLs per field (incoming + uploaded, max-files check); signed read | `v_files` list of `{url, key?, name?, size?}` — every URL preserved; same signed read | 3 |
-| Derived fields on write | `recomputeMultiFieldDerived` on submit / edit / bulk edit | recomputed by Node from the merged row (read through the reader) and written as patches of the same edit | 3 |
+| Derived fields on write **Δ** | `recomputeMultiFieldDerived` on submit / edit / bulk edit | none: the edit writes only its source cells; derived columns are computed at read by the one reader; Node marks dependent fields stale from its derived dependency graph | 3 |
 | Unique identifier (guard, check-unique) | partial unique index + `uniqueIdentifierValue` | small edits: `dataset_unique_claims` (unique index) + reader check inside the edit transaction (C44); Delta jobs: whole-column check before commit (C1) | 3 |
 | Screening (inclusion / exclusion) | `ScreeningAttempt` collection in Mongo | unchanged (Mongo); only the export join reads rows | 3 / 7 |
 | Hidden fields for non-owners | dropped in grid read | same, on the projected columns | 2 |
@@ -81,8 +88,8 @@ the scope is part of every cache key ([consistency §12](consistency.md#12-cache
 
 | Feature | Today | On the Data Service | Phase |
 |---|---|---|---|
-| Formula / score / conditional / field-pick derived fields (create, backfill) | keyset pages + `bulkWrite` / `updateMany` | spec compiled to SQL/Polars → one revision | 3 (recompute) / 6 (catalogue) |
-| Derived recompute after source edits | per-row in write paths | in the same small edit (or Delta-job operation); set-based recompute for column-wide changes | 3 |
+| Formula / score / conditional / field-pick derived fields (create, backfill) **Δ** | keyset pages + `bulkWrite` / `updateMany` | one Python spec compiler → DuckDB expressions computed **at read** per table (base, `followups`, `table_<fieldId>`) for every consumer; create / change = schema-only revision, nothing stored or backfilled; golden vectors from the TS evaluators first | 3 |
+| Derived recompute after source edits | per-row in write paths | none — nothing is stored, so nothing is recomputed (no derived-recompute job); staleness from the dependency graph | 3 |
 | Conversion (analyze / apply), range helpers | aggregate + pipeline update | same spec, executed by the Data Service | 6 |
 | Cleaning rules + report | — (new) | rule catalogue → revision + report | 6 |
 
@@ -92,7 +99,7 @@ the scope is part of every cache key ([consistency §12](consistency.md#12-cache
 |---|---|---|---|
 | All Python analyses + statistical tables + bulk DOCX | Python reads `records` from Mongo | `DataServiceRowSource`: rows of the published revision from the Data Service's one reader | 5 |
 | Legacy survival, charts, field stats | Node reads rows / `Record.aggregate` | `streamRows` / `fields:stats` | 5 |
-| Analysis staleness / recompute | from write paths | the changed fields, marked in the edit or publish transaction; recompute through the event outbox (today's debounced auto-recompute); compaction marks nothing | 3 |
+| Analysis staleness / recompute | from write paths | the changed fields plus the derived fields depending on them (Node's dependency graph), marked in the edit or publish transaction; recompute through the event outbox (today's debounced auto-recompute); compaction marks nothing | 3 |
 | Filter → record ids for subsets | `findFilteredRecordIds` | `rows:ids` | 2 |
 | Export to Excel | synchronous, in memory (`downloadAll` loads every row) | synchronous below a size threshold; above it an async export job (xlsx/csv/sav/parquet) | 7 |
 | Screening export | `$lookup` on records | DataStore join | 7 |
@@ -103,7 +110,7 @@ the scope is part of every cache key ([consistency §12](consistency.md#12-cache
 |---|---|---|---|
 | AI records agent (query, count, get, submit, update, bulk edit/delete, restore) | core services | same core services over `DataStore`, same row scope; caps from config | 7 |
 | AI doc-build (subset ids, field variance, subset counts) | aggregates + `findFilteredRecordIds` | `rows:ids`, `fields:stats` | 5 / 7 |
-| AI field context, import type detection | `sampleEntriesByField` / Node helpers | `:sample` / detect job | 2 |
+| AI field context, import type detection (AI refine) | `sampleEntriesByField` / Node helpers | `:sample` / the `detect` job's optional AI refine over the value maps | 2 |
 
 ## 9. Platform
 

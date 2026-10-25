@@ -1,7 +1,7 @@
 # Data Service — Consistency Protocol (v3)
 
-**Status:** Proposed (v3.3, 2026-10-24: hybrid edits — small edits as Mongo patches in one Node transaction, one reader, compaction and patch retention, change log in Mongo, unique-identifier claims; v3.2: token CAS, attempt-guarded transitions, watermark + rebase rules, mandatory schema snapshots, held-op freeze, caller idempotency, cancel vs publish, dataset restore invariants) · must be prototyped in Phase 0 before any other build
-**Last updated:** 2026-10-24
+**Status:** Proposed (v3.4, 2026-10-25: derived fields of new forms computed at read by the one reader — an edit does no derived work, a derived-field change is a schema-only revision (PRD D12); v3.3, 2026-10-24: hybrid edits — small edits as Mongo patches in one Node transaction, one reader, compaction and patch retention, change log in Mongo, unique-identifier claims; v3.2: token CAS, attempt-guarded transitions, watermark + rebase rules, mandatory schema snapshots, held-op freeze, caller idempotency, cancel vs publish, dataset restore invariants) · must be prototyped in Phase 0 before any other build
+**Last updated:** 2026-10-25
 **Back to:** [tech-design.md](tech-design.md) · [data-model.md](data-model.md) · [api.md](api.md)
 
 v3 answers three reviews (2026-10-21 ×2, 2026-10-24). v1 trusted the Mongo pointer to hide
@@ -120,12 +120,18 @@ serialisation fails, stores `snapshot: null` above its size limit, and records t
 
 - `dataset_schemas { _id, datasetId, hash, fields, sizeBytes }`, unique `(datasetId, hash)`;
   `fields` is the canonical projection of the post-change field list (types, options, value
-  labels, order). Above the configured inline size it goes to S3 (`schemas/<hash>.json.gz`,
-  SSE-KMS) and the document keeps `{ s3Key, sha256 }`, uploaded **before** the transaction.
+  labels, order, derived-field specs). Above the configured inline size it goes to S3
+  (`schemas/<hash>.json.gz`, SSE-KMS) and the document keeps `{ s3Key, sha256 }`, uploaded
+  **before** the transaction.
 - **Initial ingest** creates the first snapshot; the first revision references it.
 - An operation that changes the schema writes its snapshot **in the publish transaction**,
   reusing an existing one when the hash matches. Other revisions — every small edit among
   them — inherit their predecessor's `schemaRef`.
+- A **derived-field** create / change (PRD D12) is a **schema-only revision**: Node publishes it
+  with the edit transaction's revision CAS (§14.2) — `tables`, `maxRowId` and `patches` copied
+  from n, a new `schemaRef` holding the derived spec, `kind: 'schema'`, `writerToken: null` —
+  and writes nothing to Delta or `dataset_patches`. What readers see changes, so `dataVersion`
+  = n+1, and that field and the derived fields depending on it are marked stale.
 - **Mandatory:** if the snapshot cannot be written or (for S3) verified readable, the publish
   aborts — a revision never carries a dangling `schemaRef`.
 - Readers resolve field types, options and value labels from `schemaRef`, never from the live
@@ -271,7 +277,7 @@ and Node repeats the check inside the publish transaction (§6 step 1):
 | Small edits (cell edits, inserts, deletes/restores) not touching the job's input or output fields or its row scope | **Yes** — their patches have `seq > W` and stay on top of the new base |
 | Small edits touching the job's input or output fields, or inserting / deleting rows in its row scope | No |
 | **Any** base rewrite (another compaction, a transform, a dataset restore) | No |
-| A schema change (type cast, options, column add/archive) | No |
+| A schema change (type cast, options, column add/archive, derived-field change) | No |
 
 A compaction has no input/output fields of its own, so only the last three rows apply to it.
 Any incompatible revision → the job's commit is refused and it **re-prepares** from the newest
@@ -436,7 +442,8 @@ the group publishes as **one** revision. (Small edits publish through the edit t
    between the job's commit and its publish. Node repeats the rebase check (§4.5) here, inside
    the transaction, over the patches with `seq > W`. **Incompatible** = a patch on one of the
    job's `result.touchedFieldIds` (fields whose *existing* values it rewrote — none for an
-   append) or a row op (insert / delete / restore), and any Delta-job revision since the base;
+   append) or a row op (insert / delete / restore), and any Delta-job or schema-only revision
+   since the base;
    it rejects the publish, reconciliation rolls the job's commits back, and the job re-prepares
    (or freezes, §4.6). `result.changedFieldIds` is separate: it only drives staleness (an append
    changes every field's data but touches no existing value). Compatible edits never force a
@@ -449,7 +456,8 @@ the group publishes as **one** revision. (Small edits publish through the edit t
 4. A schema change carried by the operation (type cast, column add/archive) is applied to the
    form, and its mandatory `dataset_schemas` snapshot is written or reused (§2.1) — failure
    aborts the publish — so form and data never disagree.
-5. Analysis staleness for `result.changedFieldIds` — bounded `updateMany` by form and field
+5. Analysis staleness for `result.changedFieldIds` plus the derived fields that depend on them
+   (Node's derived dependency graph, PRD D12) — bounded `updateMany` by form and field
    (statistical tables, survival, analyses). Compaction has none (§15.2).
 6. Quota: settle the reservation; re-validate it if it is no longer `held` (§7).
 7. Revision timeline: `RevisionBatch` for the operation (§8.2), and its `dataset_changes` entry.
@@ -705,8 +713,8 @@ Node, for one small edit:
    datasets.freezeEpoch`; then, from the one reader at revision n (§15): the current value of
    every target (the `before`), the state and `_created_by` of every row touched (row scope,
    `ROW_GONE`), and — for a unique-identifier field — whether the new value already exists in
-   revision n. Derived fields are recomputed by Node from the merged row it read, and become
-   patches of the same edit.
+   revision n. An edit does **no derived work**: derived columns are computed at read (§15.1),
+   so the edit writes only its own cells; step 2.6 covers the derived fields that depend on them.
 2. **`withTransaction`** (retries transient errors), budgeted well under a second:
    1. **CAS** `datasets.findOneAndUpdate({ _id, currentRevision: n, freezeEpoch: e, status: 'ready' },
       { $set: { currentRevision: n+1, lastEditAt: $$NOW }, $inc: { patchSeq: k, rowCount: Δ } })` — `k` patches
@@ -718,7 +726,8 @@ Node, for one small edit:
       `patches = { fromSeq: n.fromSeq, toSeq: patchSeq }`; `rowCount` = n's + inserted +
       restored − deleted; `kind: 'edit'`, `batchId`, `writerToken: null`.
    5. `manifest.dataVersion = n+1` and `Form.dataVersion = n+1` (a small edit always changes values).
-   6. **Analysis staleness** for the changed fields — the same bounded `updateMany` as §6 step 5.
+   6. **Analysis staleness** for the changed fields plus the derived fields that depend on them
+      (Node's derived dependency graph) — the same bounded `updateMany` as §6 step 5.
    7. **Change log:** one `dataset_changes` entry per changed target `{ datasetId, revision: n+1,
       batchId, target, before, after, actor, at }` (§8.1).
    8. **`RevisionBatch`** for the batch (`mutationId ≡ batchId`).
@@ -735,7 +744,8 @@ Node, for one small edit:
 
 A crash anywhere before the commit leaves nothing (Mongo aborts the transaction); a crash after
 it loses nothing (the retry with the same idempotency key returns the stored result, the event
-sweeper delivers the events).
+sweeper delivers the events). A derived-field create / change publishes through the same CAS as
+a schema-only revision, with no patches (§2.1).
 
 ### 14.3 Concurrency — edits serialize on the revision
 
@@ -822,6 +832,9 @@ Service. For revision n it reads the Delta tables at `n.tables` versions and the
    row's own `_deleted_at`; deleted rows are dropped unless the trash is being read.
 3. **Cell** = the latest `set` patch of the target by `seq` (`t: 'null'` clears it), else the
    base value. Child tables (`table_<fieldId>`, `followups`) merge the same way, by full target.
+4. **Derived columns** = the DuckDB expressions compiled from the derived specs of the
+   revision's `schemaRef`, evaluated over the merged values of each table (PRD D12). They are
+   computed here for every consumer and never stored, patched or folded by compaction.
 
 Rules that keep this the only path:
 

@@ -1,7 +1,7 @@
 # Data Service — Data Model
 
 **Status:** Proposed · not built
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Back to:** [tech-design.md](tech-design.md) · [consistency.md](consistency.md) · [api.md](api.md)
 
 MongoDB keeps **metadata and the small edits**; the uploaded dataset (big data) lives in Delta
@@ -28,6 +28,13 @@ an operation (type cast, column add/archive) is applied to the form in the same 
 transaction and captured as an immutable post-change snapshot in `dataset_schemas` (not the
 revision layer's optional capture), which the new revision references as `schemaRef`; pinned
 revisions are read with their own snapshot ([consistency §2.1](consistency.md#21-schema-of-a-revision)).
+
+For `dataservice` forms (PRD D12) the imported fields are the form draft returned by the Data
+Service's `:validate` (types, deduped and ordered options, correction map), persisted as is
+([api §2.5](api.md#25-import-validation)). A derived field keeps its spec and metadata here —
+source field ids, dedupe keys, the dependency graph used for staleness — but its values are
+never stored: the one reader computes them at read
+([tech design §7.2](tech-design.md#72-derived-fields-new-forms)).
 
 ### `payments` — quota counters
 
@@ -132,9 +139,9 @@ together with the `datasets.currentRevision` move.
 | `schemaRef` | ObjectId | → `dataset_schemas`; mandatory post-change snapshot the data matches; never deleted while a retained revision references it |
 | `rowCount` | number | Live rows in this revision (copied to `datasets.rowCount`) |
 | `dataVersion` | number | The latest revision number that changed values; equal to `revision` except after a compaction, which copies its predecessor's (copied to `Form.dataVersion`) |
-| `kind` | operation type (job-type enum below, or `edit`) | `edit` and `compact` never appear in the user-facing version list |
+| `kind` | operation type (job-type enum below), `edit`, or `schema` (schema-only revision, e.g. a derived-field change — [consistency §2.1](consistency.md#21-schema-of-a-revision)) | `edit` and `compact` never appear in the user-facing version list |
 | `opId` \| `batchId` | string | Producing operation (Delta job) or small-edit batch |
-| `writerToken` | number \| null | Lease token that produced it; `null` for a small edit |
+| `writerToken` | number \| null | Lease token that produced it; `null` for a small edit or a schema-only revision |
 | `specId`, `reportKey` | | For transform / clean |
 | `pinnedUntil` | Date \| null | Retention, running jobs, open pagination ([consistency §11](consistency.md#11-retention)) |
 | `createdBy`, `publishedAt` | | |
@@ -145,10 +152,10 @@ and patch-retention pins).
 ### `dataset_schemas`
 
 `{ _id, datasetId, hash, fields | { s3Key, sha256 }, sizeBytes, createdAt }` — immutable,
-content-addressed post-change field list (types, options, value labels, order). Written by the
-first ingest and by every schema-changing publish (reused when the hash matches); large ones
-live in S3 and are uploaded and verified before the publish transaction. Not the revision
-layer's optional capture ([consistency §2.1](consistency.md#21-schema-of-a-revision)). Index:
+content-addressed post-change field list (types, options, value labels, order, derived-field
+specs). Written by the first ingest and by every schema-changing publish (reused when the hash
+matches); large ones live in S3 and are uploaded and verified before the publish transaction.
+Not the revision layer's optional capture ([consistency §2.1](consistency.md#21-schema-of-a-revision)). Index:
 `{ datasetId: 1, hash: 1 }` unique.
 
 ### `data_operations`
@@ -208,7 +215,7 @@ sweeper only once the operation is `failed` / `rolled_back` or missing.
 | Field | Type | Notes |
 |---|---|---|
 | `datasetId`, `opId` | ObjectId, string | A job that writes data runs as an operation |
-| `type` | `'ingest' \| 'compact' \| 'transform' \| 'clean' \| 'bulk_edit' \| 'bulk_delete' \| 'restore_rows' \| 'column_archive' \| 'column_restore' \| 'type_migration' \| 'reindex_unique' \| 'derived_recompute' \| 'export' \| 'vacuum' \| 'purge'` (+ read-only `'detect'`) | Writing types carry `opId`; `bulk_edit` / `bulk_delete` / `restore_rows` are the set-based forms beyond the small-edit cap |
+| `type` | `'ingest' \| 'compact' \| 'transform' \| 'clean' \| 'bulk_edit' \| 'bulk_delete' \| 'restore_rows' \| 'column_archive' \| 'column_restore' \| 'type_migration' \| 'reindex_unique' \| 'export' \| 'vacuum' \| 'purge'` (+ read-only `'detect'`: stages the upload to Parquet and builds the value maps) | Writing types carry `opId`; `bulk_edit` / `bulk_delete` / `restore_rows` are the set-based forms beyond the small-edit cap. No derived-recompute type: derived columns are computed at read |
 | `compute` | `'lambda' \| 'fargate'` | Chosen by Node ([tech design §3.3](tech-design.md#33-compute-selection-per-job-by-node)) |
 | `status` | `'queued' \| 'running' \| 'succeeded' \| 'failed' \| 'cancelled'` | |
 | `progress` | `{ done, total, unit: 'rows' \| 'bytes' \| 'chunks' }` | From callbacks (progress only — effects come from publish) |
@@ -263,7 +270,7 @@ patch table and no Delta change log: small edits are `dataset_patches`, the chan
 | `_created_at`, `_updated_at` | timestamp | Default grid order is `_created_at, _rid` (today: `createdAt, _id` — `_rid` is that ObjectId, and it orders rows that exist only in patches too) |
 | `_deleted_at` | timestamp \| null | Soft delete (today `status: 'inactive'` + `deletedAt`); hidden from reads, purged after the trash window |
 | `uniqueIdentifierValue` | string \| null | Denormalised unique-identifier value (as today); uniqueness checked by the edit transaction (claims + reader) and by Delta jobs before their commit |
-| `f_<fieldId>` | per field type | See value types below |
+| `f_<fieldId>` | per field type | See value types below. Derived fields have no column (computed at read) |
 
 **Value types** (same `t` as patches, [consistency §9](consistency.md#9-cell-addressing-and-values)):
 number → float64, text → string (`""` kept), date → date, choices → `list<string>` of option
@@ -292,4 +299,6 @@ Not a Delta table: the before/after values of one Delta job that changed many ce
 
 ## 4. What stays in MongoDB for `storage = 'mongo'` forms
 
-Everything as today (`records`, revisions, etc.). Nothing in this document applies to them.
+Everything as today (`records`, revisions, etc.), served by today's Node code — import,
+derived-field evaluators, Mongo grid filters, type conversion — unchanged and frozen (PRD D11).
+Nothing in this document applies to them.

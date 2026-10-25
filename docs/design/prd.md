@@ -2,7 +2,7 @@
 
 **Status:** Proposed · design under review · not built
 **Owner:** Pawan Gupta
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Tech design:** [tech-design.md](tech-design.md) · **Consistency:** [consistency.md](consistency.md) · **Plan:** [implementation-plan.md](implementation-plan.md)
 
 **Vocabulary.** A **revision** is a published state of a whole dataset (`datasets.currentRevision`);
@@ -60,6 +60,7 @@ a measured value.)*
 - Files above 10 GB (decision D6), and SAS / Stata in v1 (Stata `.dta` comes nearly free
   later — same library as SPSS).
 - Running user-written code (R or Python scripts) on the server.
+- Merging the Data Service with the existing Python analysis service (deferred, D13).
 
 ---
 
@@ -92,7 +93,7 @@ a measured value.)*
 
 | ID | Requirement |
 |---|---|
-| P1 | Type detection (text, number, MCQ, date) over the **whole** file, not a sample, with the same correction rules as today's import |
+| P1 | Type detection (text, number, MCQ, date) over the **whole** file, not a sample — once per distinct value of each column, in the Data Service — with today's import correction rules as the reference (golden test vectors, D12) |
 | P2 | Coded columns: show code → label mapping; allow a separate codebook file for CSV/xlsx |
 | P3 | The user can change a column's type before confirming; suggestions follow the chosen type |
 | P4 | Thousands of columns must render: column virtualisation in the grid, and a **paged schema** (preview, type editing and field lists load columns in pages, never the whole schema at once) |
@@ -177,6 +178,9 @@ Retention mechanics: [consistency §11](consistency.md#11-retention).
 - Forms created before the cut-over stay `mongo` **for life**, including new records and
   follow-ups entered into them later. One form's data is never split across two stores.
 - Forms created after the cut-over, and every new import, are `dataservice`.
+- The Node code that serves `mongo` forms today — import, derived-field evaluators, Mongo grid
+  filters, type conversion — keeps serving them unchanged and is frozen: no new rules are added
+  to it (D11). For `dataservice` forms the Data Service owns that logic (D12).
 - All features reach row data through one **DataStore** interface with two implementations,
   so a feature works the same on both. See [tech-design.md §4](tech-design.md#4-datastore-abstraction).
 - Optional later: move an old form on demand (user action or size threshold). Not required.
@@ -188,13 +192,16 @@ Retention mechanics: [consistency §11](consistency.md#11-retention).
 | D1 | A separate Python Data Service owns row storage and compute; Node orchestrates | 2026-10-21 |
 | D2 | Old data stays in MongoDB; only new forms/imports go to the Data Service | 2026-10-21 |
 | D3 | SPSS and R parsing is done in Python (pyreadstat / pyreadr) | 2026-10-21 |
-| D4 | Neither MongoDB nor Databricks for row data: **Delta Lake on S3 + DuckDB/Polars** (Mongo keeps metadata) | 2026-10-21 |
+| D4 | Neither MongoDB nor Databricks for row data: **Delta Lake on S3 + DuckDB** (delta-rs, pyarrow; Polars only if a benchmark shows DuckDB is insufficient) (Mongo keeps metadata) | 2026-10-21 |
 | D5 | The Data Service is a **new repository** | 2026-10-21 |
 | D6 | Max file size **10 GB** | 2026-10-21 |
 | D7 | **Every feature that exists today works on the Data Service**, including cell editing on large datasets — see [feature-parity.md](feature-parity.md) | 2026-10-21 |
 | D8 | **Hybrid edits:** small edits (≤ 500 rows) are Mongo patches written by Node in one transaction — no Delta commit, lease or queue; the uploaded dataset and every big or set-based change stay in Delta; one Data Service reader merges both for every read; compaction folds patches into Delta. The Data Service reads only `dataset_patches`, read-only — [consistency §14–§15](consistency.md#14-small-edits--one-mongo-transaction) | 2026-10-24 |
 | D9 | Many users edit one dataset at once; on the same cell the later commit wins (Google Docs style), the earlier value stays in history and undo | 2026-10-24 |
 | D10 | No DynamoDB lock table: Delta commits on S3 are coordinated by S3 conditional writes (C0 passed) | 2026-10-24 |
+| D11 | **Old forms stay as they are.** `storage: 'mongo'` forms are never migrated, and the Node code that serves them keeps serving them unchanged: import (`src/v2/modules/import`), derived-field evaluators (transform formula / score / conditional / field-pick helpers, `record/core/helpers/write/multifield-derived.helper.ts`), Mongo grid filters (`record/core/helpers/read/db-filter.helper.ts`, `record/analysis/helpers/analysis-filter.helper.ts`) and type conversion (`common/utils/field-conversion.util.ts`). This is the legacy store's code, not duplication to remove — frozen: no new rules are added to it | 2026-10-25 |
+| D12 | **New forms: the Data Service owns their data logic.** Import of every format (xlsx first, then CSV / Parquet, later `.sav` / `.rds`): the file is staged once to Parquet, one classifier runs per distinct value of each column, and detection, option suggestions, notices and the optional AI refine come from that value map; ingest casts by the same map, so the preview is what is committed. Confirm-time validation is one synchronous Data Service call whose form draft Node persists as is. Derived fields are compiled once in Python and computed **at read** by the one reader — never stored or patched. Node keeps auth, Zod shape, quota, jobs and derived metadata (sources, dedupe keys, staleness graph). Today's Node rules are the reference for golden test vectors, not a second engine — [tech-design §7.1](tech-design.md#71-import-and-type-detection-new-forms), [§7.2](tech-design.md#72-derived-fields-new-forms) | 2026-10-25 |
+| D13 | **No merge with the existing Python analysis service, for now.** Two services stay; the analysis service reads Data Service rows at a pinned revision through the Data Service ([tech-design §4.6](tech-design.md#46-python-analysis-on-data-service-datasets)). A later merge (one repository, workload roles api / jobs / Lambda) was analysed and deferred; it is not planned | 2026-10-25 |
 
 ## 7. Open questions
 

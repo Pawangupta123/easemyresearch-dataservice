@@ -2,7 +2,7 @@
 
 **Status:** Proposed · not built
 **Owner:** Pawan Gupta
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **PRD:** [prd.md](prd.md) · **APIs:** [api.md](api.md) · **Plan:** [implementation-plan.md](implementation-plan.md) · **Protocol:** [consistency.md](consistency.md)
 
 ---
@@ -13,12 +13,13 @@ A new **Python Data Service** stores and computes over dataset rows. **Node** st
 public API: it authenticates, checks form permissions and quotas, writes the audit trail,
 keeps form/schema metadata in MongoDB, orchestrates jobs, and is the **only publisher** of
 dataset revisions. The uploaded dataset lives as **Delta Lake tables on S3**, queried with
-**DuckDB / Polars**; **small edits** (cells, rows, bulk-edit parts up to 500 rows) are Mongo
+**DuckDB**; **small edits** (cells, rows, bulk-edit parts up to 500 rows) are Mongo
 documents (`dataset_patches`) that Node writes in one transaction, and **one reader** in the
 Data Service merges both for every read (hybrid edits, decided 2026-10-24).
 Short jobs run on **Lambda**, heavy jobs on **Fargate**, and the interactive grid is served by
-a small **always-on query service**. Existing forms stay on MongoDB; a **DataStore** interface
-hides which store a form uses.
+a small **always-on query service**. Existing forms stay on MongoDB with today's Node code
+(D11); for new forms the Data Service owns import, type detection, validation and derived
+fields (D12, §7.1–§7.2); a **DataStore** interface hides which store a form uses.
 
 ```
             ┌──────────────────────── Browser (FE) ───────────────────────┐
@@ -52,7 +53,7 @@ hides which store a form uses.
 | Concern | Choice | Reason |
 |---|---|---|
 | Row storage | Delta Lake (Parquet + transaction log) on S3 | Columnar (reads only needed columns), compressed (target: 6 GB CSV ≈ 1–2 GB), versioned (readers pin a published revision; undo is change-log based, [consistency §8](consistency.md#8-history-and-undo)), supports MERGE/UPDATE/DELETE for jobs and compaction, and **Databricks reads it natively** — no migration if we move there later |
-| Engine | DuckDB (SQL) + Polars (dataframes) | Single-node, out-of-core, seconds on tens of millions of rows (target); no cluster to run or pay for when idle |
+| Engine | DuckDB (SQL), with delta-rs and pyarrow | Single-node, out-of-core, seconds on tens of millions of rows (target); no cluster to run or pay for when idle. Polars is **not** a dependency — optional, only if a benchmark shows DuckDB is insufficient |
 | Writer | `deltalake` (delta-rs) ≥ 1.6 | Writes Delta without Spark/JVM; small enough for Lambda; concurrent commits coordinated by S3 conditional writes — no lock table ([consistency §3](consistency.md#3-s3-commit-coordination-conditional-writes)) |
 | Metadata + small edits | MongoDB (existing) | Forms, fields, permissions, operations, revisions, jobs — and small edits (`dataset_patches`, change log) — are small, transactional, already there; an edit commits in one Mongo transaction instead of a Delta commit ([consistency §14](consistency.md#14-small-edits--one-mongo-transaction)) |
 | Orchestration | Node + BullMQ (existing, standard — no Pro) | One public API, existing auth/audit/quota |
@@ -66,7 +67,7 @@ hides which store a form uses.
 | Databricks | Strong for 100 GB+ / ETL; per-query latency and per-hour cost for a grid; small-edit file churn | ✗ now (same Delta files work there later) |
 | Postgres | Good editing; 10 GB file → ~20–30 GB rows + indexes on an always-on instance; column scans slower than columnar; schema per dataset is awkward with thousands of columns | runner-up |
 | ClickHouse | Very fast grid/analytics; updates are heavy "mutations"; an always-on cluster to run | ✗ for edit-heavy use |
-| **Delta Lake on S3 + DuckDB/Polars** | Columnar + compressed (target: 10 GB → ~2–3 GB), seconds on tens of millions of rows, versioned, MERGE for edits, pay-per-use compute | **chosen** |
+| **Delta Lake on S3 + DuckDB** | Columnar + compressed (target: 10 GB → ~2–3 GB), seconds on tens of millions of rows, versioned, MERGE for edits, pay-per-use compute | **chosen** |
 
 ### 2.1 Databricks — considered, deferred
 
@@ -82,12 +83,17 @@ Fargate task.**
 
 The existing service (`EASEMYRESEARCH_PYTHONMS_V1`, FastAPI) is a stateless
 statistics-over-Mongo API: no file parsing, no upload handling, none of
-polars / duckdb / pyarrow / deltalake / pyreadstat / pyreadr, no job queue, synchronous
+duckdb / pyarrow / deltalake / pyreadstat / pyreadr, no job queue, synchronous
 handlers under a 30 s timeout, one process deployed by systemd. The Data Service needs long
 jobs, large memory, Lambda/Fargate packaging and its own scaling, so it is a **separate
 repository and deployable**. It reuses from the existing service: the auth pattern
 (`x-api-key` → upgraded to signed tokens), the S3 helpers, and the cohort filter semantics
 (`app/features/shared/cohort/`), which become the grid filter compiler's reference.
+
+**Merge deferred (D13, 2026-10-25).** Merging the two Python services later — one repository
+with workload roles (api / jobs / Lambda) — was analysed and deferred; it is not planned. Until
+then the analysis service reads Data Service rows at a pinned revision through the Data Service
+(§4.6).
 
 ### 2.3 Size estimates (6 GB CSV, ~200 columns, ~30 M rows — targets until Phase 0 / Q3 data)
 
@@ -129,8 +135,8 @@ Two deployables built from one codebase:
 
 | Deployable | Runs on | Does |
 |---|---|---|
-| `query-api` | ECS Fargate service, always on (1–2 tasks, autoscale) | Rows window, count, distinct, column stats, cell reads, schema reads at a published revision — all through the **one reader**; hosts the **writer** (`:drain`) that takes the lease and commits Delta-job operations. Keeps hot datasets cached on local disk |
-| `jobs` | Lambda (container image) **or** Fargate task, chosen per job by Node | Ingest/convert, type detection, transforms, cleaning, compaction, export, purge — heavy work outside the lease, short fenced commit at the end; inputs read through the one reader |
+| `query-api` | ECS Fargate service, always on (1–2 tasks, autoscale) | Rows window, count, distinct, column stats, cell reads, schema reads at a published revision — all through the **one reader**, derived columns computed at read (§7.2); the synchronous import `:validate` (§7.1); hosts the **writer** (`:drain`) that takes the lease and commits Delta-job operations. Keeps hot datasets cached on local disk |
+| `jobs` | Lambda (container image) **or** Fargate task, chosen per job by Node | Stage + detect (§7.1), ingest/convert, transforms, cleaning, compaction, export, purge — heavy work outside the lease, short fenced commit at the end; inputs read through the one reader |
 
 Both talk to S3 (data) and back to Node (internal endpoints). Their only Mongo access is the
 reader's **read-only** access to `dataset_patches` ([consistency §15.1](consistency.md#151-the-reader));
@@ -140,7 +146,7 @@ they never write Mongo and never publish.
 
 | Job | Default | Escalate to Fargate when |
 |---|---|---|
-| Ingest CSV / Parquet | Lambda (streaming) | file > configured size or estimated time > 12 min |
+| Stage + detect, ingest xlsx / CSV / Parquet | Lambda (streaming) | file > configured size or estimated time > 12 min |
 | Ingest SPSS `.sav` | Lambda, chunked; parallel fan-out by row ranges for big files | single chunk cannot finish in time |
 | Ingest R `.rds` / `.RData` | Lambda if file ≤ configured limit | always Fargate above it (R files load fully into memory; RAM need is a multiple of file size) |
 | Transform / clean | Lambda | dataset rows × columns above threshold |
@@ -231,6 +237,9 @@ interface WriteResult { rowsChanged: number; rowsAdded: number; rowsRemoved: num
 ```
 
 - `MongoStore` wraps today's Q/M/D repositories and the six bypasses — **no behaviour change**.
+  The Node logic around `mongo` forms — import, derived-field evaluators, Mongo grid filters,
+  type conversion — keeps serving them unchanged and is frozen (D11); it is not re-used for
+  `dataservice` forms (§7.1–§7.2).
 - `DataServiceStore` reads through the Data Service internal API ([api.md §2](api.md#2-internal-api-node--data-service)),
   writes small edits to Mongo itself, and submits Delta jobs as operations.
 - `replaceRow` is keyed by row id only (today's per-row revision restore), so it needs a
@@ -263,7 +272,7 @@ The DataStore returns a `WriteResult`; the calling service keeps the same effect
 |---|---|---|
 | Entry quota | `Form.entryCount` + `Payment.used_entries` deltas | Small edit: guarded `$inc` inside the edit transaction; Delta job: reserved in the **same transaction as the operation insert**, settled at publish ([consistency §7](consistency.md#7-quota-reservations)) |
 | `Form.dataVersion` | `incrementFormDataVersion` in the write transaction | = the latest value-changing revision (`manifest.dataVersion`), set in the edit or publish transaction; a compaction leaves it |
-| Analysis staleness | `markAllDirtyForForm` / `incrementVersionForColumns` | From the changed fields, in the edit or publish transaction |
+| Analysis staleness | `markAllDirtyForForm` / `incrementVersionForColumns` | From the changed fields plus the derived fields that depend on them (Node's derived dependency graph, §7.2), in the edit or publish transaction |
 | Audit | `auditScope()` / activity log | Unchanged; the atomic audit record is written in the edit or publish transaction |
 | Revision / undo | Revision layer snapshots (Mongo) | `RevisionBatch` + `dataset_changes` in the same transaction; change-log undo ([consistency §8](consistency.md#8-history-and-undo)) |
 
@@ -307,21 +316,22 @@ as today. `RecordsCoreReadService` picks the store:
 ### 4.6 Python analysis on Data Service datasets
 
 This is the **existing, live** Python analysis service (not the new Data Service, which is not
-built yet). It has **two readers** of `records`: the analysis shared repository
-(`app/features/shared/repository.py`, `db.records.find(...)` → full list in memory) and
-`bulk_report` (which also filters `deletedAt`). Both read `_id`, `uniqueIdentifierValue`,
-`parentFieldId`, `followUpNumber`, `rowIndex`. Plan:
+built yet). It stays a separate service (D13). It has **two readers** of `records`: the
+analysis shared repository (`app/features/shared/repository.py`, `db.records.find(...)` → full
+list in memory) and `bulk_report` (which also filters `deletedAt`). Both read `_id`,
+`uniqueIdentifierValue`, `parentFieldId`, `followUpNumber`, `rowIndex`. Plan:
 
 1. Introduce a **RowSource** at both seams: `MongoRowSource` (today) and `DataServiceRowSource`,
    which **asks the Data Service** for the rows of the published revision Node passes in —
    projected to the variables the request uses, filters pushed down, the same row-scope filter
-   as §4.3. The analysis service never reads Delta files or `dataset_patches` itself; the Data
-   Service's one reader merges them ([consistency §15.1](consistency.md#151-the-reader)).
+   as §4.3, derived columns included (computed at read, §7.2). The analysis service never reads
+   Delta files or `dataset_patches` itself; the Data Service's one reader merges them
+   ([consistency §15.1](consistency.md#151-the-reader)).
 2. Phase 1 of this: `DataServiceRowSource` yields the **same in-memory record shape and fields**
    the engines expect (`data[] = {fieldId, value, optionIds, rowIndex, …}`) — zero engine
    changes, correct results, fine up to ~1 M rows (target).
-3. Phase 2: engines move to columnar frames (Polars/pandas of the needed columns) one analysis
-   at a time, behind parity tests, for very large datasets.
+3. Phase 2: engines move to columnar frames of the needed columns (pandas, already a
+   dependency) one analysis at a time, behind parity tests, for very large datasets.
 4. Long analyses move from the 30 s synchronous call to a job (the Data Service job runner),
    with the existing recompute flow polling its result. Analyses store `computedAtRevision`.
 
@@ -373,6 +383,7 @@ whole column before its fenced commit.
 ```
 s3://<bucket>/datasets/<datasetId>/
   raw/<uploadId>/<original-file-name>          # immutable upload, kept per retention policy
+  staged/<uploadId>.parquet                     # the upload converted once (§7.1); kept with raw/
   table/                                        # Delta table: base data
      _delta_log/…                               # versions (pinned by published revisions)
      part-*.parquet
@@ -393,7 +404,8 @@ ops/<datasetId>/<opId>.json.gz                  # large operation payloads (SSE-
   latest": every read resolves the dataset's **published revision**, which pins the version of
   every table and the patch range ([consistency §2](consistency.md#2-revision-manifest)).
 - Column names in the Delta table are **field ids** (`f_<fieldId>`), not user labels, so a
-  rename is a metadata change only. Labels live in Mongo.
+  rename is a metadata change only. Labels live in Mongo. Derived fields have **no** Delta
+  column: they are computed at read (§7.2).
 - Values are stored in **typed nullable columns** (`v_str`, `v_num`, `v_date`, `v_opts`,
   `v_files`): choice values are option id strings (`v_opts`); file values, today arrays of URL
   strings, become `v_files list<struct{url, key?, name?, size?}>` with the original URL kept
@@ -458,7 +470,8 @@ The size of the dataset does not change the cost of an edit; the size of the **c
 | Bulk edit / paste (selected rows) | ≤ `BULK_EDIT_MAX_ROWS` (500) per save part — today's cap; a paste of up to 5,000 rows goes in parts | One edit transaction per part | < 2 s per part (target) | Targeted batch undo, conflicts shown |
 | "Set column X where <filter>" / paste over all filtered rows | beyond the cap, up to all rows | **Set-based Delta job**: `UPDATE … WHERE` compiled from the filter → new revision; before-values written to its change file | seconds–minutes (target; job with progress) | Targeted undo of that column/filter (only the cells this job changed) |
 | Add / delete / rename column | schema | Metadata (rename) or Delta schema evolution (add); delete = hide, purged after retention | < 2 s (target) | Revision of the form schema |
-| Change column type | all rows of one column | Synchronous duplicate check first for unique fields; field enters a **migration-pending** state; job casts into a new column, keeps the old until confirmed; derived fields recomputed (Phase 3) | job | Old column kept for the undo window |
+| Create / change a derived field | schema only | Schema-only revision (new `schemaRef`); nothing written to Delta or patches (§7.2) | as an edit (one Mongo transaction) | Revision of the form schema |
+| Change column type | all rows of one column | Synchronous duplicate check first for unique fields; field enters a **migration-pending** state; job casts into a new column, keeps the old until confirmed; derived columns that read it follow at read (§7.2) — nothing to recompute | job | Old column kept for the undo window |
 | Add rows / delete rows | n (≤ the cap; more → Delta job) | Patches `insert_row` / `delete_row` / `restore_row` | as patches | Targeted undo |
 
 Whole-dataset restore to an earlier revision exists, but only as an explicit, separate
@@ -467,17 +480,69 @@ action — never as the implementation of undo.
 The grid never waits on a job: a job's result appears as a new revision, and the UI shows
 "applying…" with progress for that column/filter until it lands.
 
-## 7. Transforms and cleaning
+## 7. Import, derived fields, transforms and cleaning
 
 - Transforms and cleaning rules are **declarative specs** stored in Mongo, from catalogues
   (the existing transform/derivation catalogue is extended, not duplicated).
-- The Data Service compiles a spec to DuckDB SQL / Polars expressions — **never** `eval` of
-  user input.
-- Each run reads revision N (pinned) and publishes revision N+1 through the normal operation
-  path; the report (rule → rows affected, examples, before/after counts) is saved to `reports/`.
+- The Data Service compiles a spec to DuckDB SQL expressions — **never** `eval` of user input.
+- Each transform or cleaning run reads revision N (pinned) and publishes revision N+1 through the
+  normal operation path; the report (rule → rows affected, examples, before/after counts) is
+  saved to `reports/`. Derived fields differ: nothing is stored (§7.2).
 - Lineage: each derived field records its inputs and spec id.
 - Rule catalogue (initial): range, allowed values, missing codes, regex/format, duplicates on
   key, trim/case, type coercion, unit conversion, recode map, outlier flag (flag only).
+
+### 7.1 Import and type detection (new forms)
+
+For `dataservice` forms every import format runs in the Data Service (D12): xlsx first, then
+CSV and Parquet, later `.sav` / `.rds` (Phase 4). Node's import module keeps serving `mongo`
+forms only (D11).
+
+1. **Stage once.** The `detect` job converts the upload once to `staged/<uploadId>.parquet`;
+   detection, validation and ingest read that file, never the original again.
+2. **One classifier per distinct value.** Per column, DuckDB groups the staged values
+   (`GROUP BY value` with its count) and one classifier runs on every **distinct** value,
+   emitting a **value map** `value → (class, parsed value)`. Type detection (text / number /
+   MCQ / date, multi-value cells), MCQ / typo / ordinal option suggestions, notices and the
+   optional AI refine are computed from these maps — over the whole file, not a sample (P1).
+3. **Validate on confirm.** Node sends the user's edited fields to
+   `POST /v1/datasets/{id}:validate` (synchronous, [api §2.5](api.md#25-import-validation)),
+   which returns the issues (today's message text), the normalized fields and the final **form
+   draft**: types, deduped and ordered options, and the correction map. Node does auth, Zod
+   shape, quota and job status / cancel, and persists exactly that draft to `forms`; it keeps no
+   thresholds or option logic for new forms.
+4. **Ingest by the same map.** The `ingest` job casts every column by joining the staged values
+   on the same value map (with the draft's corrections), so the preview the user confirmed is
+   exactly what is committed.
+
+Today's Node rules (`import-type-*.helper.ts`, `import-column-stats.helper.ts`,
+`import-options-canonical.helper.ts`) are the **reference**: golden test vectors are built from
+them and the Python classifier must pass them. They are not re-implemented in Node for new forms
+and not kept "in parity" as a second engine.
+
+### 7.2 Derived fields (new forms)
+
+- **One spec compiler** in the Data Service turns a derived field's spec (formula, score,
+  conditional, field-pick — today's catalogue) into a DuckDB expression.
+- **Computed at read.** The one reader adds the derived columns to every read of a revision,
+  per table (base, `followups`, `table_<fieldId>`), for every consumer: grid (sort, filter,
+  counts), export, field stats, and `rows:stream` for the analysis service. They are **never
+  stored or patched**: no Delta column, no `dataset_patches`, no backfill, and no
+  `derived_recompute` job for `dataservice` forms; compaction has nothing derived to fold.
+- **Create / change** a derived field = a **schema-only revision**: a new `schemaRef` holding the
+  spec, Delta versions and patch range copied from n, published by Node with the edit
+  transaction's revision CAS ([consistency §2.1](consistency.md#21-schema-of-a-revision)); that
+  field and the derived fields depending on it are marked stale.
+- **An edit does no derived work.** It writes only the source cells; Node marks the dependent
+  derived fields stale from its dependency graph in the same transaction.
+- **Node keeps only metadata:** the spec as form data (never evaluated in Node), source field
+  ids, dedupe keys and the staleness dependency graph. The TypeScript evaluators keep serving
+  `mongo` forms (D11).
+- **Follow-ups.** Golden vectors from the TypeScript evaluators come first (they have no unit
+  tests today); they pin the score `missingPolicy: 'zero'` case where every component is empty
+  (today it scores 0) and the numeric-range default. A spec-hash-keyed materialisation at
+  compaction is a documented escape hatch, used only if benchmarks show read-time computing is
+  too slow.
 
 ## 8. Grid queries
 
