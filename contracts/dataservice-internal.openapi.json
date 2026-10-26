@@ -89,6 +89,28 @@
         "title": "ApiResponse[RowsPage]",
         "type": "object"
       },
+      "ApiResponse_TableCreated_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TableCreated"
+          },
+          "message": {
+            "default": "Success",
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ApiResponse[TableCreated]",
+        "type": "object"
+      },
       "Cell": {
         "properties": {
           "target": {
@@ -535,6 +557,47 @@
         "title": "RowsQueryRequest",
         "type": "object"
       },
+      "TableCreateRequest": {
+        "additionalProperties": false,
+        "description": "A dataset's first table — the rows of its first import.",
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldDto"
+            },
+            "minItems": 1,
+            "title": "Fields",
+            "type": "array"
+          },
+          "rows": {
+            "$ref": "#/components/schemas/TableRowsDto"
+          }
+        },
+        "required": [
+          "fields",
+          "rows"
+        ],
+        "title": "TableCreateRequest",
+        "type": "object"
+      },
+      "TableCreated": {
+        "properties": {
+          "rowCount": {
+            "title": "Rowcount",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "rowCount"
+        ],
+        "title": "TableCreated",
+        "type": "object"
+      },
       "TableDto": {
         "additionalProperties": false,
         "properties": {
@@ -548,6 +611,77 @@
           "version"
         ],
         "title": "TableDto",
+        "type": "object"
+      },
+      "TableRowsDto": {
+        "additionalProperties": false,
+        "description": "A new table's rows, column by column (compact, and each column becomes one Arrow array).",
+        "properties": {
+          "createdAt": {
+            "items": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "title": "Createdat",
+            "type": "array"
+          },
+          "createdBy": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Createdby",
+            "type": "array"
+          },
+          "rid": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Rid",
+            "type": "array"
+          },
+          "values": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "rid",
+          "createdBy",
+          "createdAt",
+          "values"
+        ],
+        "title": "TableRowsDto",
         "type": "object"
       },
       "TablesDto": {
@@ -869,6 +1003,74 @@
           }
         },
         "summary": "Query Rows",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
+    "/v1/datasets/{dataset_id}/table:create": {
+      "post": {
+        "operationId": "create_dataset_table_v1_datasets__dataset_id__table_create_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TableCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_TableCreated_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Dataset Table",
         "tags": [
           "datasets"
         ]

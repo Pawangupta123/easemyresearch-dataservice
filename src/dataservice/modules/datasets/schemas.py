@@ -143,3 +143,36 @@ class CellsRead(_Reply):
     revision: int
     cells: list[Cell]
     rows: list[RowState]
+
+
+class TableRowsDto(_Body):
+    """A new table's rows, column by column (compact, and each column becomes one Arrow array)."""
+
+    rid: list[RowId]
+    created_by: list[str | None]
+    created_at: list[datetime]
+    values: dict[str, list[CellValue]]  # by field id: one value per row
+
+
+class TableCreateRequest(_Body):
+    """A dataset's first table — the rows of its first import."""
+
+    fields: list[FieldDto] = Field(min_length=1)
+    rows: TableRowsDto
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "TableCreateRequest":
+        _unique(self.fields, "fields")
+        size = len(self.rows.rid)
+        if len(self.rows.created_by) != size or len(self.rows.created_at) != size:
+            raise ValueError("rows: every column must have one value per row")
+        if set(self.rows.values) != {item.field_id for item in self.fields}:
+            raise ValueError("rows.values must hold exactly the listed fields")
+        if any(len(column) != size for column in self.rows.values.values()):
+            raise ValueError("rows: every column must have one value per row")
+        return self
+
+
+class TableCreated(_Reply):
+    version: int
+    row_count: int

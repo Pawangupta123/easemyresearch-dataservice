@@ -21,7 +21,10 @@ from dataservice.modules.datasets.schemas import (
     RowsCountRequest,
     RowsPage,
     RowsQueryRequest,
+    TableCreated,
+    TableCreateRequest,
 )
+from dataservice.modules.datasets.table_create import create_table
 from dataservice.storage.mongo_patches import Document, MongoPatchSource
 from dataservice.storage.snapshot import PatchSource
 
@@ -29,6 +32,7 @@ router = APIRouter(prefix="/v1/datasets", tags=["datasets"])
 
 DatasetId = Annotated[str, Path(pattern=OBJECT_ID)]
 ReadClaims = Annotated[DatasetClaims, Depends(require_dataset_token("read"))]
+JobClaims = Annotated[DatasetClaims, Depends(require_dataset_token("job"))]
 
 
 @lru_cache
@@ -72,3 +76,14 @@ def read_cells(
     dataset_id: DatasetId, body: CellsReadRequest, claims: ReadClaims, root: LakeRoot, patches: Patches
 ) -> ApiResponse[CellsRead]:
     return ok(service.read_cells(root, dataset_id, body, claims, patches))
+
+
+@router.post("/{dataset_id}/table:create")
+def create_dataset_table(
+    dataset_id: DatasetId,
+    body: TableCreateRequest,
+    claims: JobClaims,
+    root: LakeRoot,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ApiResponse[TableCreated]:
+    return ok(create_table(root, dataset_id, body, settings.delta_retention_days))
