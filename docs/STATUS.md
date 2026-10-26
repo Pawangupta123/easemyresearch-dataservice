@@ -1,6 +1,6 @@
 # Status — Phase 0
 
-**As of:** 2026-10-25 · branch `exp/skeleton` at `2d163b7` (off `feat/lease-fence`, local only, never pushed) · nothing in production
+**As of:** 2026-10-25 · branch `exp/skeleton` at `bb148f6` (off `feat/lease-fence`, local only, never pushed) · nothing in production
 
 Phase 0 = scaffold + consistency prototype ([design/implementation-plan.md](design/implementation-plan.md),
 scenarios in [design/consistency.md §13](design/consistency.md#13-phase-0-prototype--must-pass-before-phase-1)).
@@ -12,7 +12,7 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 ## 0. Resume here (read this first after a break or a context compaction)
 
 **Branch:** `exp/skeleton` (dataservice, local only — an experiment: kept if the prototype works,
-dropped if not) · last code commit `2d163b7` · 288 tests (200 unit, 88 integration). Node's side:
+dropped if not) · last code commit `bb148f6` · 299 tests (210 unit, 89 integration). Node's side:
 backend branch `exp/dataservice-skeleton` (off `feat/datastore-phase1`, local only). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
 `2c9e864c` = decision D14, **not pushed**); `docs/design/` here is an identical copy
 (synced to `2c9e864c`) — change both together.
@@ -51,7 +51,30 @@ never the backend's `.env.test` DB).
   Data Service form's rows from `records` (0) — `DataServiceGlobalCounts` (critic M12) in step 5;
   (c) `storage` in formMetadata for the FE (critic M15) in step 8; (d) on Windows call the
   service by `127.0.0.1`: `localhost` tries IPv6 first and Python clients wait ~2 s.
-- **Next: step 4** (Node): one cell edit through bulk-edit as one Mongo transaction.
+- 2026-10-26 — **prototype ready for the user's testing** (on the backend `.env` DB, which the
+  user says is a testing DB; production is commented out there):
+  - Speed: data files are written in 128k-row groups (`96bd01f`) — a newest-first page of 1M rows
+    278 → 153 ms (DuckDB reads one row group per thread).
+  - Step 4 done: a grid cell edit (bulk-edit) on a Data Service form = patches + revision n+1 in
+    ONE Mongo transaction, same entry checks as Mongo forms, only changed cells written; Node
+    `e97f3bd6`; Python reads Node's ObjectId `datasetId` (`616ec67`). Live: ~120 ms docker,
+    ~650 ms Atlas.
+  - xlsx import → new Data Service form (allow-listed users): the import's own preview / record
+    walk, rows sent to the new `POST /v1/datasets/{id}/table:create` (job token, `bb148f6`), then
+    form + dataset + revision 1 in one transaction (Node `73b6e5f3`, fix `41cb6e36`). Live: 20k
+    rows in 2.8 s. A shortcut of plan step 7 (detection/validation stay in Node for now).
+  - Form lists / dashboards / quota count Data Service rows (`DataServiceGlobalCounts`, `4a26218b`).
+  - Unported row actions refused with 422 (add / delete / restore rows, single-row view or edit,
+    paste into every row, follow-ups, add column) — `4ba402a2`.
+  - Test setup: `pnpm dataservice:start` (backend repo) runs this service on the backend `.env`
+    DB + local lake `.lake/`; `pnpm dataservice:seed --email <login>` seeds a 1M-row form;
+    smokes `scripts/smoke/dataservice-{grid,import}.smoke.ts` on docker (`c08730dc`, `c1ee944d`).
+    Seeded for the user (pawankumar37060@gmail.com, `68a56476884db212d4f1d0a6`): form
+    `f0ed000000000000000f4240`. Warm page on Atlas ~290 ms.
+- Still open: search / filters / column sort, follow-up visits, row add / delete, version history
+  for these forms, plan step 6 (lease / operations / publish port), detection in Python (D12),
+  `storage` shown in the FE.
+- **Next:** the user's testing (2026-10-26); then their call on what to build next.
 
 **Earlier (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
 hardened after a 55-agent adversarial review (every finding fixed with a test; 12,000 random
