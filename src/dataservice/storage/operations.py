@@ -8,11 +8,13 @@ Every call is checked against the dataset's live lease; a lost lease raises `Fen
 the writer stops at once (the next holder's recovery takes over).
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from dataservice.storage.fenced_commit import OpRef
+from deltalake import DeltaTable
+
+from dataservice.storage.fenced_commit import CommitContext, OpRef
 from dataservice.storage.lease import Lease
 
 
@@ -100,3 +102,19 @@ class OperationAuthority(Protocol):
     def publish(self, request: PublishRequest, lease: Lease) -> int:
         """Node's publish transaction; returns the new revision (the same one on a retry)."""
         ...
+
+
+@dataclass(frozen=True)
+class WriterTables:
+    """Where a dataset's Delta tables live, by manifest name (one base table in the skeleton)."""
+
+    uris: Mapping[str, str]
+    storage_options: Mapping[str, str] = field(default_factory=dict)
+
+    def open(self, name: str) -> DeltaTable:
+        return DeltaTable(self.uris[name], storage_options=dict(self.storage_options))
+
+
+# A job type: write the Delta commits of one attempt and say what the publish must record. Jobs
+# are registered with the writer (modules/writer/service.py) by the app (main.py).
+Job = Callable[[Mapping[str, object], WriterTables, CommitContext], JobResult]

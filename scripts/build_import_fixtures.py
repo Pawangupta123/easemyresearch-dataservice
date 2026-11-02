@@ -9,6 +9,7 @@ expected preview next to each (`<name>.golden.json`); the Data Service's tests t
 own detection to produce the same. Deterministic: no randomness, fixed dates.
 """
 
+import re
 import zipfile
 from collections.abc import Callable, Sequence
 from datetime import date, datetime
@@ -91,6 +92,9 @@ CATEGORIES: list[Column] = [
     ("Consent typo", lambda i: "ye" if i == 7 else ("Yes" if i % 2 else "No")),
     # A misspelling seen twice in 60: twice is already a main answer (no suggestion).
     ("Gender", lambda i: "Femail" if i in (3, 9) else ("Female" if i % 2 else "Male")),
+    # Cell text named like JavaScript Object keys: a value / an option, never Object's function.
+    ("Occupation", lambda i: ("Constructor", "toString", "valueOf")[i % 3] if i % 7 == 0 else f"Job {i}"),
+    ("Role", _cycle(["Constructor", "Teacher", "Nurse", "toString"])),
 ]
 
 STRUCTURE: list[Column] = [
@@ -129,16 +133,22 @@ def _write(name: str, columns: list[Column], *, gap_after: int | None = None) ->
                 sheet.append([])
         sheet.append([value(index) for _, value in columns])
     workbook.save(OUT / f"{name}.xlsx")
-    _excel_line_breaks(OUT / f"{name}.xlsx")
+    _as_excel_writes(OUT / f"{name}.xlsx")
 
 
-def _excel_line_breaks(path: Path) -> None:
-    """Store a cell's CR as Excel does (`_x000D_`), not as openpyxl's raw CR: XML parsers turn a raw
-    CR into a line feed, which Excel-written files never ask of them."""
+# Text that starts or ends with whitespace, without the attribute Excel always gives it.
+_UNPRESERVED = re.compile(rb"<t>(\s[^<]*|[^<]*\s)</t>")
+
+
+def _as_excel_writes(path: Path) -> None:
+    """Store text as Excel does, not as openpyxl: a cell's CR as `_x000D_` (XML parsers turn a raw
+    CR into a line feed), and `xml:space="preserve"` on text with leading or trailing spaces
+    (without it, XML readers may drop the spaces — Excel never leaves it out)."""
     with zipfile.ZipFile(path) as source:
         parts = {name: source.read(name) for name in source.namelist()}
     sheet = "xl/worksheets/sheet1.xml"
     parts[sheet] = parts[sheet].replace(b"\r\r\n", b"_x000D_\n")
+    parts[sheet] = _UNPRESERVED.sub(rb'<t xml:space="preserve">\1</t>', parts[sheet])
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as target:
         for name, data in parts.items():
             target.writestr(name, data)

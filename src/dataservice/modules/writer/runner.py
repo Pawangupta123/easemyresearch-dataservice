@@ -19,11 +19,11 @@ import structlog
 from deltalake import DeltaTable
 
 from dataservice.common.errors import FenceError
-from dataservice.modules.writer.service import WriterTables, drain
+from dataservice.modules.writer.service import drain
 from dataservice.storage.fenced_commit import max_token_seen
 from dataservice.storage.layout import dataset_table_uris
 from dataservice.storage.lease import Lease, LeaseAuthority
-from dataservice.storage.operations import OperationAuthority
+from dataservice.storage.operations import OperationAuthority, WriterTables
 
 log = structlog.get_logger()
 

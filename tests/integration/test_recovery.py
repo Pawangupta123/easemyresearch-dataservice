@@ -9,10 +9,10 @@ from deltalake import DeltaTable
 from pymongo.database import Database
 
 from dataservice.common.errors import FenceError
-from dataservice.modules.writer.service import WriterTables, recover, run_append_rows
+from dataservice.modules.writer.service import recover, run_append_rows
 from dataservice.storage.fenced_commit import CommitContext, OpRef, append, max_token_seen
 from dataservice.storage.lease import Lease
-from dataservice.storage.operations import Commit, JobResult, PublishRequest
+from dataservice.storage.operations import Commit, JobResult, PublishRequest, WriterTables
 from prototype.node_side.authority import NodeAuthority
 from prototype.node_side.edit_store import EditRejected
 from prototype.node_side.lease_store import EPOCH, MongoLeaseStore

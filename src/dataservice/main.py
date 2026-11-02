@@ -11,8 +11,11 @@ from dataservice.config import get_settings
 from dataservice.config.logging import configure_logging
 from dataservice.modules.datasets.router import router as datasets_router
 from dataservice.modules.health.router import router as health_router
+from dataservice.modules.ingest.job import JOB_TYPE as INGEST_UPLOAD
+from dataservice.modules.ingest.job import ingest_upload
 from dataservice.modules.ingest.router import router as ingest_router
 from dataservice.modules.writer.router import router as writer_router
+from dataservice.modules.writer.service import register_job
 from dataservice.storage.reader import ReaderLimits, configure
 
 
@@ -20,6 +23,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings)
     configure(ReaderLimits(settings.duckdb_threads, settings.duckdb_memory_limit, settings.duckdb_temp_directory))
+    # The writer runs the job types other modules own (modules stay independent of each other).
+    register_job(INGEST_UPLOAD, ingest_upload)
     # Every route declares a Pydantic return type: FastAPI then serialises straight to JSON
     # bytes in Pydantic's Rust core — faster than a custom (orjson) response class.
     # Each router carries its own auth — /health the scaffold token, /v1/datasets/... the scoped

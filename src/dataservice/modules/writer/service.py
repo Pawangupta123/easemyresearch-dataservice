@@ -16,33 +16,28 @@ An operation whose publish is refused after `committed` stays at the head and th
 First job type: `append_rows` — rows of an import added to the base table.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import cast
 
 import pyarrow as pa
-from deltalake import DeltaTable
 
 from dataservice.common.errors import AppError, FenceError, OperationFailedError
 from dataservice.storage.fenced_commit import CommitContext, OpRef, append
 from dataservice.storage.lease import Lease
-from dataservice.storage.operations import Commit, JobResult, OperationAuthority, PublishRequest
+from dataservice.storage.operations import (
+    Commit,
+    Job,
+    JobResult,
+    OperationAuthority,
+    PublishRequest,
+    WriterTables,
+)
 from dataservice.storage.reconcile import data_commits_after, reconcile
 from dataservice.storage.staging import read_staged_json
 
 BASE = "base"
-
-
-@dataclass(frozen=True)
-class WriterTables:
-    """Where the dataset's Delta tables live (one base table in the prototype)."""
-
-    uris: Mapping[str, str]
-    storage_options: Mapping[str, str] = field(default_factory=dict)
-
-    def open(self, name: str) -> DeltaTable:
-        return DeltaTable(self.uris[name], storage_options=dict(self.storage_options))
 
 
 @dataclass(frozen=True)
@@ -64,10 +59,6 @@ class AttemptFailed(Exception):
     def __init__(self, op_id: str, final: bool, cause: Exception) -> None:
         super().__init__(f"operation {op_id} attempt failed ({'final' if final else 'will retry'}): {cause}")
         self.op_id, self.final = op_id, final
-
-
-# A job writes its Delta commits for one attempt and says what the publish must record.
-Job = Callable[[Mapping[str, object], WriterTables, CommitContext], JobResult]
 
 
 def _from_json(value: object, arrow_type: pa.DataType) -> object:
@@ -123,7 +114,14 @@ def append_rows(payload: Mapping[str, object], tables: WriterTables, context: Co
     return JobResult(rows_added=rows.num_rows, changed_field_ids=fields)
 
 
-JOBS: Mapping[str, Job] = {"append_rows": append_rows}
+_JOBS: dict[str, Job] = {"append_rows": append_rows}
+
+
+def register_job(name: str, job: Job) -> None:
+    """Add a job type (the app registers the ones other modules own, e.g. an upload's ingest)."""
+    if name in _JOBS and _JOBS[name] is not job:
+        raise ValueError(f"job type {name!r} is already registered")
+    _JOBS[name] = job
 
 
 def _roll_back_own_attempt(dataset_id: str, lease: Lease, tables: WriterTables, authority: OperationAuthority) -> None:
@@ -150,7 +148,7 @@ def run_operation(
     attempt = authority.running(op_id, lease.token)
     context = CommitContext(lease.token, (OpRef(op_id, attempt),), tuple(tables.uris))
     try:
-        job = JOBS.get(op_type)
+        job = _JOBS.get(op_type)
         if job is None:
             raise AppError(f"unknown job type {op_type!r}", user_safe=False)
         result = job(authority.payload(op_id), tables, context)

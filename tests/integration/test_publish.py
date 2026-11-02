@@ -9,10 +9,10 @@ import pytest
 from deltalake import DeltaTable
 from pymongo.database import Database
 
-from dataservice.modules.writer.service import WriterTables, run_append_rows
+from dataservice.modules.writer.service import run_append_rows
 from dataservice.storage.fenced_commit import max_token_seen
 from dataservice.storage.lease import Lease
-from dataservice.storage.operations import JobResult, PublishRequest
+from dataservice.storage.operations import JobResult, PublishRequest, WriterTables
 from prototype.node_side.authority import NodeAuthority
 from prototype.node_side.edit_store import Edit, EditRejected
 from prototype.node_side.lease_store import EPOCH, MongoLeaseStore
