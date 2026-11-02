@@ -74,7 +74,8 @@ never the backend's `.env.test` DB).
 - Still open: search / filters / column sort, follow-up visits, row add / delete, version history
   for these forms, plan step 6 (lease / operations / publish port), detection in Python (D12),
   `storage` shown in the FE.
-- **Next:** the user's testing (2026-10-26); then their call on what to build next.
+- **Next:** the user's testing (started 2026-11-02); then their call on what to build next.
+- 2026-11-02 testing log: grid stopped at 100 rows — the FE drops a cursor without sortType / sortBy / rowIndex; fixed in Node `35d7ea6a`. To fix after testing: an empty `DATA_SERVICE_TOKEN_SECRET` in the API gives a vague 500 (should say the Data Service is not set up).
 
 **Earlier (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
 hardened after a 55-agent adversarial review (every finding fixed with a test; 12,000 random
