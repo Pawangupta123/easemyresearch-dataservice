@@ -142,8 +142,29 @@ never the backend's `.env.test` DB).
   secret), warm 0.04 s. Perf note for 7c: per-cell Python work dominates; big files need
   per-distinct-value grouping (DuckDB GROUP BY) and capped correction occurrences (Node stores every
   occurrence — a 1M-row preview would pass 16 MB).
-- **Next:** 7b part 3 — `:validate` (Node's confirm-time rules: import-review.service +
-  import-type-validation.helper) in Python, golden-tested; then 7c; then step 8.
+- 2026-11-02 — **`:validate` stays in Node (user's choice)**: Node's confirm-time check
+  (validateAndNormalizeImportPreviewFields) reads only the preview's metadata (type changes,
+  options, typeMetrics) — moving it would add a hop and a second copy, no capability.
+- **7c done** (Python `ac03740`, Node `60dcc761`): the `ingest_upload` job (modules/ingest/job.py,
+  registered by main.py; WriterTables + Job moved to storage/operations so modules stay
+  independent) reads the upload from the import bucket and casts it with Node's final-import rules
+  (detect/cast.py: transformCellToRecordEntry + toTableColumns + importRowRecordId, rows walked
+  bottom-to-top). Node's finalize builds the draft, has the empty table created, queues ONE
+  `ingest_upload` (payload = the upload + per column: field id, type, value type, date order,
+  corrections, option ids — `toIngestFields`) and waits; nothing staged any more. Golden vectors
+  now include Node's own final-import rows per fixture (`ingest` in *.golden.json, from
+  importWorkbookRecords); test_import_cast + test_ingest_job (a real local Delta table) match
+  them. Smoke: 20k rows imported in 2.5 s (the staged path took ~5 s).
+  - Node bug found by the port: correction maps were plain objects, so a cell "constructor" /
+    "toString" found Object's function and was stored as it (an option too) — fixed `ba1df52b`
+    (null-prototype maps) with a test; it exists on the main branches too (cherry-pick pending
+    the user's nod). Fixtures pin it (Occupation / Role columns).
+  - Known divergence: text whose leading/trailing spaces lack `xml:space="preserve"` (non-Excel
+    writers) — calamine drops whitespace-only text, SheetJS keeps it; fixtures write Excel's way.
+- **Next:** step 8 — FE: a multipart uploader (big files), the 10 MB cap raised for allow-listed
+  users, `storage` shown so guarded actions hide; then the smoke + timings on a real big file
+  (asked for). Perf before GB files: detection is per-cell Python (group by distinct value),
+  previews keep every correction occurrence (cap them), the ingest holds the sheet in memory.
 - 2026-11-02 testing log: grid stopped at 100 rows — the FE drops a cursor without sortType / sortBy / rowIndex; fixed in Node `35d7ea6a`. To fix after testing: an empty `DATA_SERVICE_TOKEN_SECRET` in the API gives a vague 500 (should say the Data Service is not set up).
 
 **Earlier (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
