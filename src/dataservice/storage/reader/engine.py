@@ -183,6 +183,21 @@ def s3_secret_sql(bucket: str, options: Mapping[str, str]) -> str:
     return f"CREATE OR REPLACE SECRET {name} ({', '.join(parts)})"
 
 
+def read_s3_object(uri: str, options: Mapping[str, str] | None = None) -> bytes:
+    """One S3 object's bytes (`s3://bucket/key`), through the same extensions and credentials as
+    the Delta reads — e.g. a job's staged input that Node wrote to its import bucket."""
+    parsed = urlparse(uri)
+    if parsed.scheme != "s3" or not parsed.netloc or not parsed.path.strip("/"):
+        raise ValueError(f"not an s3:// object: {uri!r}")
+    with connection() as con:
+        _load_s3_extensions(con)
+        con.execute(s3_secret_sql(parsed.netloc, options or {}))
+        row = con.execute("SELECT content FROM read_blob(?)", [uri]).fetchone()
+    if row is None or not isinstance(row[0], bytes):
+        raise ValueError(f"S3 object {uri!r} could not be read")
+    return row[0]
+
+
 # ── base and patches ─────────────────────────────────────────────────────────────────────────
 
 

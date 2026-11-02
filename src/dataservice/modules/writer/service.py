@@ -19,6 +19,7 @@ First job type: `append_rows` — rows of an import added to the base table.
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from typing import cast
 
 import pyarrow as pa
 from deltalake import DeltaTable
@@ -28,6 +29,7 @@ from dataservice.storage.fenced_commit import CommitContext, OpRef, append
 from dataservice.storage.lease import Lease
 from dataservice.storage.operations import Commit, JobResult, OperationAuthority, PublishRequest
 from dataservice.storage.reconcile import data_commits_after, reconcile
+from dataservice.storage.staging import read_staged_json
 
 BASE = "base"
 
@@ -83,8 +85,23 @@ def _from_json(value: object, arrow_type: pa.DataType) -> object:
     return value
 
 
+def _row_source(payload: Mapping[str, object]) -> Mapping[str, object]:
+    """The rows inline, or — for an import, too big for an operation document — staged by Node and
+    named by `source` (storage/staging.py). A read failure is transient (retried); a staged file
+    that is not `{rows: […]}` is a wrong payload (not retried)."""
+    source = payload.get("source")
+    if source is None:
+        return payload
+    if not isinstance(source, str):
+        raise AppError("append_rows source must be a URI", user_safe=False)
+    staged = read_staged_json(source)
+    if not isinstance(staged, Mapping):
+        raise AppError(f"staged rows at {source} are not an object", user_safe=False)
+    return cast(Mapping[str, object], staged)
+
+
 def _rows(payload: Mapping[str, object], schema: pa.Schema) -> pa.Table:
-    rows = payload.get("rows")
+    rows = _row_source(payload).get("rows")
     if not isinstance(rows, list) or not all(isinstance(row, Mapping) for row in rows):
         raise AppError("append_rows payload has no rows", user_safe=False)
     unknown = {key for row in rows for key in row} - set(schema.names)
