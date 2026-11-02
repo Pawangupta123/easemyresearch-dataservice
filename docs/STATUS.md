@@ -12,7 +12,7 @@ protocol end to end in Python; Node ports it to TypeScript in Phase 2. `src/` ne
 ## 0. Resume here (read this first after a break or a context compaction)
 
 **Branch:** `exp/skeleton` (dataservice, local only — an experiment: kept if the prototype works,
-dropped if not) · last code commit `bb148f6` · 299 tests (210 unit, 89 integration). Node's side:
+dropped if not) · last code commit: plan step 6 (2026-11-02, see below). Node's side:
 backend branch `exp/dataservice-skeleton` (off `feat/datastore-phase1`, local only). Backend design docs: backend branch `docs/data-service-hybrid-edits` (last
 `2c9e864c` = decision D14, **not pushed**); `docs/design/` here is an identical copy
 (synced to `2c9e864c`) — change both together.
@@ -71,10 +71,37 @@ never the backend's `.env.test` DB).
     smokes `scripts/smoke/dataservice-{grid,import}.smoke.ts` on docker (`c08730dc`, `c1ee944d`).
     Seeded for the user (pawankumar37060@gmail.com, `68a56476884db212d4f1d0a6`): form
     `f0ed000000000000000f4240`. Warm page on Atlas ~290 ms.
+- 2026-11-02 — **plan step 6 done (the writer path on real Node; Python `8289134`, Node `3f333943`)** — user: "plan ke hisaab se hi
+  banega", manual-test steps with every step:
+  - Node (backend `exp/dataservice-skeleton`): `dataset_leases` + `data_operations` models; lease
+    and operation repositories ported one-to-one from `prototype/node_side` (same CASes);
+    publish service (revision n+1, dataset head + rowCount, Form.dataVersion / entryCount,
+    staleness, op applied; rebase); writer service (the door: live lease or `FENCED`); internal
+    routes `/api/v2/internal/dataservice/…` (lease, manifest, operations/next, operations/committed,
+    operation, payload, running, committed, failed, rolled-back, publish) behind an HMAC
+    signature middleware, mounted before the rate limiter and the JSON parser, only with
+    `DATA_SERVICE_CALLBACK_SECRET`; `dataset-drain-queue` (jobId `drain-<datasetId>`, removed when
+    done) + sweeper (every 60 s; dispatches lost pending, wakes datasets with old waiting work) in
+    the import worker; `pnpm dataservice:append` (manual test), `pnpm test:dataservice`
+    (22 protocol tests on the docker replica set: C5, C6, C15, C18, C28, C29, C31, C32, rebase,
+    signed HTTP), smoke `scripts/smoke/dataservice-drain.smoke.ts` (real Python ↔ real routes).
+  - Python: `modules/writer/node_authority.py` (the HTTP authority; FENCED → FenceError,
+    OPERATION_FAILED → OperationFailedError, else retryable), `runner.py` (one drain per dataset per
+    process, a wake-up during a drain drains once more, lease heartbeat, release),
+    `POST /v1/datasets/{id}/writer:drain` (job token, 202); `storage/layout.py` (table URIs, shared
+    by modules); `append_rows` reads JSON instants / days by column type.
+  - Deviations from the step text: publish body is one op `{token, opId, attempt, commit,
+    commitToken}` (no group commit yet); `operations/next?token=` and `operations/committed` stand
+    for `operations?status=pending`; the Python scenario suite was not re-run over HTTP (`node_http`
+    marker) — Node got its own port of the scenarios plus the cross-repo smoke instead; quota
+    reservations, RevisionBatch, event outbox, `data_jobs` not ported (step 7 adds `data_jobs`);
+    revision 0 / `base: null` still unsupported (step 7).
+  - Smoke (docker, 1k rows): append 3 + a poison op → drained in ~0.7 s, revision 2, entryCount
+    1003, poison failed for good without blocking, lease released, grid total 1003, new rows on top.
 - Still open: search / filters / column sort, follow-up visits, row add / delete, version history
-  for these forms, plan step 6 (lease / operations / publish port), detection in Python (D12),
-  `storage` shown in the FE.
-- **Next:** the user's testing (started 2026-11-02); then their call on what to build next.
+  for these forms, detection in Python (D12), `storage` shown in the FE.
+- **Next:** plan step 7 — detect + `:validate` + ingest in Python behind `/datasets` routes in
+  Node's import module (needs revision 0 / `base: null`); then step 8 (FE wiring + smoke + timings).
 - 2026-11-02 testing log: grid stopped at 100 rows — the FE drops a cursor without sortType / sortBy / rowIndex; fixed in Node `35d7ea6a`. To fix after testing: an empty `DATA_SERVICE_TOKEN_SECRET` in the API gives a vague 500 (should say the Data Service is not set up).
 
 **Earlier (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),

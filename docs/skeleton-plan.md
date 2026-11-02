@@ -30,6 +30,9 @@ Progress:
     - `DataServiceGlobalCounts` (M12) to step 5.
     - `storage` in formMetadata (M15) to step 8.
     - The newest-first speedup waits for a nod (STATUS §0).
+- Steps 4–5: done (cell edit, guards; details in STATUS §0).
+- Step 6: done 2026-11-02 (lease / operations / publish on real Node, the writer over HTTP;
+  deviations and the smoke in STATUS §0).
 
 ## Summary
 
