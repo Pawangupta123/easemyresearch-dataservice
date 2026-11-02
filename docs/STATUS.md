@@ -116,8 +116,24 @@ never the backend's `.env.test` DB).
   `import:<importId>`). This sidesteps revision 0 / `base: null` entirely. Smoke
   `scripts/smoke/dataservice-import.smoke.ts` (20k rows, real writer + testing bucket): 5.3 s,
   every check OK; smokes share `scripts/smoke/dataservice-harness.ts`.
-- **Next:** 7b — golden vectors from Node's import type rules, then detection + `:validate` in
-  Python behind the same preview shape; then 7c; then step 8 (FE wiring + smoke + timings).
+- 2026-11-02 — user: "10 MB Node pehle bhi support karta tha" — yes; 7a changed how rows are
+  written, not the size. GB files need 7b (detection off Node, which reads whole files into
+  memory) + 7c (Python reads the upload) + step 8 (multipart upload, limit raised). Asked for a
+  real big sample file (CSV/xlsx 50 MB+) for 7c/8.
+- **7b part 1 done** (Python `7456c5c`, Node `9538d8d9`): `modules/ingest/detect/` = Node's import
+  rules ported value for value (cells.py: calamine + label formats from the workbook XML;
+  numeric/dates/choices/stats/preview; js.py: JavaScript's String(number), Number(text), trim,
+  UTF-16 lengths). Golden vectors: `scripts/build_import_fixtures.py` → 5 workbooks in
+  `tests/fixtures/import_golden/`; the backend's `scripts/import-golden/export-golden.ts` writes
+  `<name>.golden.json` with Node's real output; `tests/unit/test_import_golden.py` requires equal
+  fields. Mutation check (throwaway scripts): 24/25 rule mutants killed, the survivor is
+  equivalent. calamine reads 50k rows in 0.31 s (openpyxl 4.05 s); openpyxl is dev-only (fixtures).
+  Known divergence: a RAW CR inside sheet XML (sloppy writers, never Excel) — calamine follows XML
+  line-end normalisation, SheetJS does not; fixtures use Excel's `_x000D_`.
+- **Next:** 7b part 2 — Node asks the Data Service for an allow-listed user's preview (same preview
+  shape, FE unchanged): a dataset id reserved at upload, `POST /v1/datasets/{id}/upload:detect`
+  (job token) reads the upload from the import bucket; then `:validate` (confirm-time rules,
+  golden vectors again); then 7c; then step 8.
 - 2026-11-02 testing log: grid stopped at 100 rows — the FE drops a cursor without sortType / sortBy / rowIndex; fixed in Node `35d7ea6a`. To fix after testing: an empty `DATA_SERVICE_TOKEN_SECRET` in the API gives a vague 500 (should say the Data Service is not set up).
 
 **Earlier (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
