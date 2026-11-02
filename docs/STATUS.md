@@ -130,10 +130,20 @@ never the backend's `.env.test` DB).
   equivalent. calamine reads 50k rows in 0.31 s (openpyxl 4.05 s); openpyxl is dev-only (fixtures).
   Known divergence: a RAW CR inside sheet XML (sloppy writers, never Excel) — calamine follows XML
   line-end normalisation, SheetJS does not; fixtures use Excel's `_x000D_`.
-- **Next:** 7b part 2 — Node asks the Data Service for an allow-listed user's preview (same preview
-  shape, FE unchanged): a dataset id reserved at upload, `POST /v1/datasets/{id}/upload:detect`
-  (job token) reads the upload from the import bucket; then `:validate` (confirm-time rules,
-  golden vectors again); then 7c; then step 8.
+- **7b part 2 done** (Python `2ab01df`, Node `7227b3bc` + log `7f80e99c`): `POST
+  /v1/datasets/{id}/upload:detect` (job token; reads only `s3://<IMPORT_BUCKET>/imports/…`,
+  `IMPORT_MAX_BYTES` 100 MB) answers Node's preview shape + AI samples (`ai_samples`, golden-tested
+  too). Node: `ImportJob.datasetId` reserved at processImportFile (`reserveJobDataset`), the
+  detector call (`dataservice-upload-detector.ts`, Zod `uploadDetectedSchema`), the AI refinement
+  from samples (`ImportAiService.refineFromSamples`), the final import writes the reserved dataset.
+  `pnpm dataservice:start` passes IMPORT_BUCKET. Smoke: the workbook goes to the testing bucket,
+  the preview equals Node's rules live, 20k rows imported. Classifiers memoised per value: 20k-row
+  detection 2.6 → 1.7 s (Node 1.6 s). Cold service: first S3 read ~0.8 s (DuckDB extension +
+  secret), warm 0.04 s. Perf note for 7c: per-cell Python work dominates; big files need
+  per-distinct-value grouping (DuckDB GROUP BY) and capped correction occurrences (Node stores every
+  occurrence — a 1M-row preview would pass 16 MB).
+- **Next:** 7b part 3 — `:validate` (Node's confirm-time rules: import-review.service +
+  import-type-validation.helper) in Python, golden-tested; then 7c; then step 8.
 - 2026-11-02 testing log: grid stopped at 100 rows — the FE drops a cursor without sortType / sortBy / rowIndex; fixed in Node `35d7ea6a`. To fix after testing: an empty `DATA_SERVICE_TOKEN_SECRET` in the API gives a vague 500 (should say the Data Service is not set up).
 
 **Earlier (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
