@@ -100,8 +100,24 @@ never the backend's `.env.test` DB).
     1003, poison failed for good without blocking, lease released, grid total 1003, new rows on top.
 - Still open: search / filters / column sort, follow-up visits, row add / delete, version history
   for these forms, detection in Python (D12), `storage` shown in the FE.
-- **Next:** plan step 7 — detect + `:validate` + ingest in Python behind `/datasets` routes in
-  Node's import module (needs revision 0 / `base: null`); then step 8 (FE wiring + smoke + timings).
+- 2026-11-02 — user tested step 6 (`pnpm dataservice:append`, 5 + 5 rows; a wake-up lost while
+  the import worker ran old settings was taken by the restarted worker): all checks passed.
+- 2026-11-02 — **step 7 split into 7a / 7b / 7c (user's choice)**: 7a = the import's rows through
+  the writer path (detection stays in Node); 7b = detection + `:validate` in Python, proven equal
+  to Node's rules by golden vectors; 7c = Python reads the upload itself from S3 (big files).
+- **7a done** (Python `50f8f0e`, Node `67f0ccad`): Node walks the rows as today, the Data Service
+  writes the first table EMPTY (`table:create` with no rows), the rows are staged as gzip JSON in
+  the import bucket (`dataservice-ingest/<datasetId>/<importId>.json.gz`), one transaction
+  creates the form, the dataset at revision 1 `ingesting` and the `append_rows` operation
+  (`payload.source`), the writer appends under its lease (staging read by DuckDB `read_blob`)
+  and Node publishes revision 2; the import job then completes (the import worker waits on the
+  operation, `DATA_SERVICE_INGEST_TIMEOUT_MS`). Failed for good → form removed, dataset failed;
+  cancel wins until commit; a retried run waits for the same operation (idempotency key
+  `import:<importId>`). This sidesteps revision 0 / `base: null` entirely. Smoke
+  `scripts/smoke/dataservice-import.smoke.ts` (20k rows, real writer + testing bucket): 5.3 s,
+  every check OK; smokes share `scripts/smoke/dataservice-harness.ts`.
+- **Next:** 7b — golden vectors from Node's import type rules, then detection + `:validate` in
+  Python behind the same preview shape; then 7c; then step 8 (FE wiring + smoke + timings).
 - 2026-11-02 testing log: grid stopped at 100 rows — the FE drops a cursor without sortType / sortBy / rowIndex; fixed in Node `35d7ea6a`. To fix after testing: an empty `DATA_SERVICE_TOKEN_SECRET` in the API gives a vague 500 (should say the Data Service is not set up).
 
 **Earlier (2026-10-25):** the reader reworked for 10 GB bases (package `storage/reader/`),
