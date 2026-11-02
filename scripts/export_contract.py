@@ -26,7 +26,7 @@ from dataservice.common.utils.dataset_token import DatasetClaims
 from dataservice.config import get_settings
 from dataservice.main import app
 from dataservice.modules.datasets.router import lake_root, patch_source
-from dataservice.modules.datasets.service import table_uri
+from dataservice.storage.layout import table_uri
 from dataservice.storage.snapshot import PATCH_SCHEMA, UTC_TIMESTAMP
 
 DATASET = "6a1f00000000000000000c01"

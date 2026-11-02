@@ -12,8 +12,8 @@ from deltalake import DeltaTable
 
 from dataservice.common.errors import ConflictError, ValidationError
 from dataservice.modules.datasets.schemas import CellValue, TableCreated, TableCreateRequest
-from dataservice.modules.datasets.service import table_uri
 from dataservice.storage.fenced_commit import CommitContext, OpRef, create
+from dataservice.storage.layout import table_uri
 from dataservice.storage.snapshot import UTC_TIMESTAMP, ValueType
 
 # The rows one request may carry (a 10 MB xlsx is far below it).

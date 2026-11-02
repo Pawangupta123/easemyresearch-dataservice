@@ -18,6 +18,7 @@ First job type: `append_rows` — rows of an import added to the base table.
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import date, datetime
 
 import pyarrow as pa
 from deltalake import DeltaTable
@@ -67,6 +68,21 @@ class AttemptFailed(Exception):
 Job = Callable[[Mapping[str, object], WriterTables, CommitContext], JobResult]
 
 
+def _from_json(value: object, arrow_type: pa.DataType) -> object:
+    """A JSON value as the column's Arrow type takes it: payloads arrive as JSON, where an instant
+    is an ISO string and a day is `yyyy-mm-dd`."""
+    if not isinstance(value, str):
+        return value
+    try:
+        if pa.types.is_timestamp(arrow_type):
+            return datetime.fromisoformat(value)
+        if pa.types.is_date(arrow_type):
+            return date.fromisoformat(value)
+    except ValueError as error:
+        raise AppError(f"not a valid {arrow_type} value: {value!r}", user_safe=False) from error
+    return value
+
+
 def _rows(payload: Mapping[str, object], schema: pa.Schema) -> pa.Table:
     rows = payload.get("rows")
     if not isinstance(rows, list) or not all(isinstance(row, Mapping) for row in rows):
@@ -74,7 +90,12 @@ def _rows(payload: Mapping[str, object], schema: pa.Schema) -> pa.Table:
     unknown = {key for row in rows for key in row} - set(schema.names)
     if unknown:
         raise AppError(f"rows carry columns the dataset does not have: {sorted(unknown)}", user_safe=False)
-    return pa.Table.from_pylist(list(rows), schema=schema)
+    types = {name: schema.field(name).type for name in schema.names}
+    typed = [{key: _from_json(value, types[key]) for key, value in row.items()} for row in rows]
+    try:
+        return pa.Table.from_pylist(typed, schema=schema)
+    except (pa.ArrowInvalid, pa.ArrowTypeError) as error:
+        raise AppError(f"rows do not match the dataset's columns: {error}", user_safe=False) from error
 
 
 def append_rows(payload: Mapping[str, object], tables: WriterTables, context: CommitContext) -> JobResult:

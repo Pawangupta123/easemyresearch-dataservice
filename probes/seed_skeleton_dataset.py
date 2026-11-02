@@ -23,8 +23,9 @@ import pyarrow as pa
 
 from dataservice.common.utils.dataset_token import DatasetClaims
 from dataservice.modules.datasets.schemas import ManifestDto, RowsQueryRequest
-from dataservice.modules.datasets.service import count_rows, query_rows, table_uri
+from dataservice.modules.datasets.service import count_rows, query_rows
 from dataservice.storage.fenced_commit import CommitContext, OpRef, create
+from dataservice.storage.layout import table_uri
 from dataservice.storage.snapshot import PATCH_SCHEMA
 
 EPOCH = 1_767_225_600  # 2026-01-01T00:00:00Z: row i was created i seconds later

@@ -14,8 +14,8 @@ from dataservice.common.utils import dataset_token
 from dataservice.common.utils.dataset_token import DatasetClaims, Scope
 from dataservice.main import app
 from dataservice.modules.datasets.router import lake_root, patch_source
-from dataservice.modules.datasets.service import table_uri
 from dataservice.storage.fenced_commit import WRITER_APP_ID
+from dataservice.storage.layout import table_uri
 from dataservice.storage.snapshot import PATCH_SCHEMA
 from tests.conftest import SECRET
 

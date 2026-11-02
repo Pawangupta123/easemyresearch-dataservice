@@ -5,14 +5,12 @@ The caller never names a table: its URI comes from the lake root and the dataset
 manifest can only point at this dataset's own tables at its own versions.
 """
 
-import re
 from collections.abc import Iterable
 from datetime import date, datetime
 
 from dataservice.common.errors import ForbiddenError
 from dataservice.common.utils.dataset_token import ALL_ROWS, DatasetClaims
 from dataservice.modules.datasets.schemas import (
-    OBJECT_ID,
     Cell,
     CellsRead,
     CellsReadRequest,
@@ -25,18 +23,10 @@ from dataservice.modules.datasets.schemas import (
     RowsQueryRequest,
     RowState,
 )
+from dataservice.storage.layout import table_uri
 from dataservice.storage.reader import Query, count, query
 from dataservice.storage.reader.model import CREATED_AT, CREATED_BY, DELETED_AT, ROW_ID, UPDATED_AT
 from dataservice.storage.snapshot import FieldSpec, PatchSource, Snapshot, TableVersion
-
-_DATASET_ID = re.compile(OBJECT_ID)
-
-
-def table_uri(lake_root: str, dataset_id: str, table: str) -> str:
-    """`<lake_root>/datasets/<datasetId>/<table>` — only for a well-formed dataset id."""
-    if not _DATASET_ID.fullmatch(dataset_id):
-        raise ValueError(f"not a dataset id: {dataset_id!r}")
-    return f"{lake_root.rstrip('/')}/datasets/{dataset_id}/{table}"
 
 
 def _specs(fields: Iterable[FieldDto]) -> tuple[FieldSpec, ...]:

@@ -16,7 +16,7 @@ from dataservice.common.utils import dataset_token
 from dataservice.common.utils.dataset_token import DatasetClaims
 from dataservice.config import Settings, get_settings
 from dataservice.main import app
-from dataservice.modules.datasets.service import table_uri
+from dataservice.storage.layout import table_uri
 from dataservice.storage.snapshot import UTC_TIMESTAMP
 from tests.conftest import SECRET
 from tests.integration.conftest import TEST_MONGODB_URL, Document

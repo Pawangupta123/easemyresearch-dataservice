@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     mongodb_url: str | None = None
     mongodb_db: str | None = None
 
+    # Node's internal writer routes (api.md §3: lease, operations, publish), e.g.
+    # http://127.0.0.1:5001/api/v2/internal/dataservice, and the HMAC secret both sides sign
+    # them with (Node's DATA_SERVICE_CALLBACK_SECRET). Unset: the writer refuses to drain.
+    node_internal_url: str | None = None
+    node_callback_secret: str | None = Field(default=None, min_length=32)
+    node_timeout_seconds: float = Field(default=15.0, gt=0)
+    # The writer renews its lease this often; Node's lease lives DATA_SERVICE_LEASE_TTL_MS (60 s).
+    writer_lease_renew_seconds: float = Field(default=15.0, gt=0)
+
     @model_validator(mode="after")
     def _refuse_unsafe_commits(self) -> "Settings":
         if self.aws_s3_allow_unsafe_rename:

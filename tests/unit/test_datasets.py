@@ -16,7 +16,8 @@ from dataservice.common.utils.dataset_token import DatasetClaims, Scope
 from dataservice.main import app
 from dataservice.modules.datasets.router import lake_root, patch_source
 from dataservice.modules.datasets.schemas import ManifestDto
-from dataservice.modules.datasets.service import snapshot_from_manifest, table_uri
+from dataservice.modules.datasets.service import snapshot_from_manifest
+from dataservice.storage.layout import table_uri
 from dataservice.storage.snapshot import PATCH_SCHEMA, FieldSpec, TableVersion
 from tests.conftest import SECRET
 
