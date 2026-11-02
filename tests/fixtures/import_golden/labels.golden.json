@@ -1,0 +1,139 @@
+{
+  "fields": [
+    {
+      "columnIndex": 1,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Consent",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "tempFieldId": "000000000000000000000001",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Yes",
+          "No"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 2
+      }
+    },
+    {
+      "columnIndex": 2,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Plain number",
+      "options": [
+        "0",
+        "1"
+      ],
+      "tempFieldId": "000000000000000000000002",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "0",
+          "1"
+        ],
+        "convertibleCount": 60,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 0,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 2
+      }
+    },
+    {
+      "columnIndex": 3,
+      "corrections": [],
+      "detectedType": "number",
+      "fieldName": "Percent",
+      "options": [],
+      "tempFieldId": "000000000000000000000003",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "0",
+          "0.1",
+          "0.2",
+          "0.3",
+          "0.4",
+          "0.5",
+          "0.6",
+          "0.7",
+          "0.8",
+          "0.9"
+        ],
+        "convertibleCount": 60,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 54,
+        "invalidCount": 0,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 10
+      }
+    },
+    {
+      "columnIndex": 4,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Sections",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "tempFieldId": "000000000000000000000004",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Yes",
+          "No"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 2
+      }
+    }
+  ],
+  "headers": {
+    "headers": [
+      "Consent",
+      "Plain number",
+      "Percent",
+      "Sections"
+    ],
+    "ok": true
+  },
+  "source": "labels.xlsx"
+}

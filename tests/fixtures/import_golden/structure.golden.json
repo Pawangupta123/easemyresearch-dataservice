@@ -1,0 +1,324 @@
+{
+  "fields": [
+    {
+      "columnIndex": 1,
+      "corrections": [],
+      "detectedType": "text",
+      "fieldName": "ID",
+      "options": [],
+      "tempFieldId": "000000000000000000000001",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "P-0000",
+          "P-0001",
+          "P-0002",
+          "P-0003",
+          "P-0004",
+          "P-0005",
+          "P-0006",
+          "P-0007",
+          "P-0008",
+          "P-0009",
+          "P-0010",
+          "P-0011",
+          "P-0012",
+          "P-0013",
+          "P-0014",
+          "P-0015",
+          "P-0016",
+          "P-0017",
+          "P-0018",
+          "P-0019",
+          "P-0020",
+          "P-0021",
+          "P-0022",
+          "P-0023",
+          "P-0024",
+          "P-0025",
+          "P-0026",
+          "P-0027",
+          "P-0028",
+          "P-0029",
+          "P-0030",
+          "P-0031",
+          "P-0032",
+          "P-0033",
+          "P-0034",
+          "P-0035",
+          "P-0036",
+          "P-0037",
+          "P-0038",
+          "P-0039"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 40,
+        "nonEmptyCount": 40,
+        "totalCount": 40,
+        "uniqueCapped": false,
+        "uniqueCount": 40
+      }
+    },
+    {
+      "columnIndex": 2,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Spaces",
+      "options": [
+        "padded",
+        "nbsp",
+        "bom",
+        "tab",
+        "plain"
+      ],
+      "tempFieldId": "000000000000000000000002",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "padded",
+          "nbsp",
+          "bom",
+          "tab",
+          "plain"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 40,
+        "nonEmptyCount": 40,
+        "totalCount": 40,
+        "uniqueCapped": false,
+        "uniqueCount": 5
+      }
+    },
+    {
+      "columnIndex": 3,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Lines",
+      "options": [
+        "line one\nline two",
+        "single"
+      ],
+      "tempFieldId": "000000000000000000000003",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "line one\nline two",
+          "single"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 40,
+        "nonEmptyCount": 40,
+        "totalCount": 40,
+        "uniqueCapped": false,
+        "uniqueCount": 2
+      }
+    },
+    {
+      "columnIndex": 4,
+      "corrections": [],
+      "detectedType": "text",
+      "fieldName": "Empty column",
+      "options": [],
+      "tempFieldId": "000000000000000000000004",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 0,
+        "nonEmptyCount": 0,
+        "totalCount": 40,
+        "uniqueCapped": false,
+        "uniqueCount": 0
+      }
+    },
+    {
+      "columnIndex": 5,
+      "corrections": [],
+      "detectedType": "text",
+      "fieldName": "Whitespace only",
+      "options": [],
+      "tempFieldId": "000000000000000000000005",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 0,
+        "nonEmptyCount": 0,
+        "totalCount": 40,
+        "uniqueCapped": false,
+        "uniqueCount": 0
+      }
+    },
+    {
+      "columnIndex": 6,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Unicode",
+      "options": [
+        "हाँ",
+        "नहीं",
+        "हा"
+      ],
+      "tempFieldId": "000000000000000000000006",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "हाँ",
+          "नहीं",
+          "हा"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 40,
+        "nonEmptyCount": 40,
+        "totalCount": 40,
+        "uniqueCapped": false,
+        "uniqueCount": 3
+      }
+    },
+    {
+      "columnIndex": 7,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Emoji",
+      "options": [
+        "😀 happy",
+        "😢 sad",
+        "😀 hapy"
+      ],
+      "tempFieldId": "000000000000000000000007",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "😀 happy",
+          "😢 sad",
+          "😀 hapy"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 40,
+        "nonEmptyCount": 40,
+        "totalCount": 40,
+        "uniqueCapped": false,
+        "uniqueCount": 3
+      }
+    },
+    {
+      "columnIndex": 8,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Rich",
+      "options": [
+        "Bold 0",
+        "Bold 1",
+        "Bold 2"
+      ],
+      "tempFieldId": "000000000000000000000008",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Bold 0",
+          "Bold 1",
+          "Bold 2"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 40,
+        "nonEmptyCount": 40,
+        "totalCount": 40,
+        "uniqueCapped": false,
+        "uniqueCount": 3
+      }
+    },
+    {
+      "columnIndex": 9,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "CRLF",
+      "options": [
+        "first\nsecond",
+        "one line"
+      ],
+      "tempFieldId": "000000000000000000000009",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "first\nsecond",
+          "one line"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 40,
+        "nonEmptyCount": 40,
+        "totalCount": 40,
+        "uniqueCapped": false,
+        "uniqueCount": 2
+      }
+    }
+  ],
+  "headers": {
+    "headers": [
+      "ID",
+      "Spaces",
+      "Lines",
+      "Empty column",
+      "Whitespace only",
+      "Unicode",
+      "Emoji",
+      "Rich",
+      "CRLF"
+    ],
+    "ok": true
+  },
+  "source": "structure.xlsx"
+}

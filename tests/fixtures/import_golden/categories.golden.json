@@ -1,0 +1,712 @@
+{
+  "fields": [
+    {
+      "columnIndex": 1,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Smoker",
+      "options": [
+        "Yes",
+        "No",
+        "Yse",
+        "Nope"
+      ],
+      "tempFieldId": "000000000000000000000001",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Yes",
+          "No",
+          "Yse",
+          "Nope"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 4
+      }
+    },
+    {
+      "columnIndex": 2,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Sex",
+      "options": [
+        "Male",
+        "Female",
+        "Femal"
+      ],
+      "tempFieldId": "000000000000000000000002",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Male",
+          "Female",
+          "Femal"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 3
+      }
+    },
+    {
+      "columnIndex": 3,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Pain",
+      "options": [
+        "None",
+        "Mild",
+        "Moderate",
+        "Severe"
+      ],
+      "tempFieldId": "000000000000000000000003",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "None",
+          "Mild",
+          "Moderate",
+          "Severe"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 4
+      }
+    },
+    {
+      "columnIndex": 4,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Agreement",
+      "options": [
+        "Strongly disagree",
+        "Disagree",
+        "Neutral",
+        "Agree",
+        "Strongly agree"
+      ],
+      "tempFieldId": "000000000000000000000004",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Strongly disagree",
+          "Disagree",
+          "Neutral",
+          "Agree",
+          "Strongly agree"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 5
+      }
+    },
+    {
+      "columnIndex": 5,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Blood group",
+      "options": [
+        "O",
+        "A",
+        "B",
+        "AB"
+      ],
+      "tempFieldId": "000000000000000000000005",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "O",
+          "A",
+          "B",
+          "AB"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 4
+      }
+    },
+    {
+      "columnIndex": 6,
+      "corrections": [],
+      "detectedType": "text",
+      "fieldName": "Ward",
+      "options": [],
+      "tempFieldId": "000000000000000000000006",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Ward 0",
+          "Ward 1",
+          "Ward 2",
+          "Ward 3",
+          "Ward 4",
+          "Ward 5",
+          "Ward 6",
+          "Ward 7",
+          "Ward 8",
+          "Ward 9",
+          "Ward 10",
+          "Ward 11",
+          "Ward 12",
+          "Ward 13",
+          "Ward 14",
+          "Ward 15",
+          "Ward 16",
+          "Ward 17",
+          "Ward 18",
+          "Ward 19",
+          "Ward 20",
+          "Ward 21",
+          "Ward 22",
+          "Ward 23",
+          "Ward 24"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 25
+      }
+    },
+    {
+      "columnIndex": 7,
+      "corrections": [],
+      "detectedType": "text",
+      "fieldName": "Patient name",
+      "options": [],
+      "tempFieldId": "000000000000000000000007",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Patient 0",
+          "Patient 1",
+          "Patient 2",
+          "Patient 3",
+          "Patient 4",
+          "Patient 5",
+          "Patient 6",
+          "Patient 7",
+          "Patient 8",
+          "Patient 9",
+          "Patient 10",
+          "Patient 11",
+          "Patient 12",
+          "Patient 13",
+          "Patient 14",
+          "Patient 15",
+          "Patient 16",
+          "Patient 17",
+          "Patient 18",
+          "Patient 19",
+          "Patient 20",
+          "Patient 21",
+          "Patient 22",
+          "Patient 23",
+          "Patient 24",
+          "Patient 25",
+          "Patient 26",
+          "Patient 27",
+          "Patient 28",
+          "Patient 29",
+          "Patient 30",
+          "Patient 31",
+          "Patient 32",
+          "Patient 33",
+          "Patient 34",
+          "Patient 35",
+          "Patient 36",
+          "Patient 37",
+          "Patient 38",
+          "Patient 39",
+          "Patient 40",
+          "Patient 41",
+          "Patient 42",
+          "Patient 43",
+          "Patient 44",
+          "Patient 45",
+          "Patient 46",
+          "Patient 47",
+          "Patient 48",
+          "Patient 49",
+          "Patient 50",
+          "Patient 51",
+          "Patient 52",
+          "Patient 53",
+          "Patient 54",
+          "Patient 55",
+          "Patient 56",
+          "Patient 57",
+          "Patient 58",
+          "Patient 59"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 60
+      }
+    },
+    {
+      "columnIndex": 8,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Stage",
+      "options": [
+        "Stage I",
+        "Stage II",
+        "Stage III",
+        "Stage IV"
+      ],
+      "tempFieldId": "000000000000000000000008",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Stage I",
+          "Stage II",
+          "Stage III",
+          "Stage IV"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 4
+      }
+    },
+    {
+      "columnIndex": 9,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Codes as options",
+      "options": [
+        "2",
+        "4",
+        "10",
+        "33"
+      ],
+      "tempFieldId": "000000000000000000000009",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "2",
+          "4",
+          "10",
+          "33"
+        ],
+        "convertibleCount": 60,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 0,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 4
+      }
+    },
+    {
+      "columnIndex": 10,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Flags",
+      "options": [
+        "true",
+        "false"
+      ],
+      "tempFieldId": "00000000000000000000000a",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "true",
+          "false"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 2
+      }
+    },
+    {
+      "columnIndex": 11,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Tick all",
+      "notices": [
+        {
+          "kind": "long_options",
+          "message": "\"Tick all\" has 1 unusually long option. Each cell may hold several answers at once (a \"tick all that apply\" column). Import it as text if that is the case.",
+          "samples": [
+            "Fever, cough, sore throat, headache, body ache Fever, cough,…"
+          ]
+        }
+      ],
+      "options": [
+        "Fever, cough, sore throat, headache, body ache Fever, cough, sore throat, headache, body ache Fever, cough, sore throat, headache, body ache Fever, cough, sore throat, headache, body ache Fever, cough, sore throat, headache, body ache",
+        "None"
+      ],
+      "tempFieldId": "00000000000000000000000b",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Fever, cough, sore throat, headache, body ache Fever, cough, sore throat, headache, body ache Fever, cough, sore throat, headache, body ache Fever, cough, sore throat, headache, body ache Fever, cough, sore throat, headache, body ache",
+          "None"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 2
+      }
+    },
+    {
+      "columnIndex": 12,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Rare",
+      "options": [
+        "Left",
+        "Right"
+      ],
+      "tempFieldId": "00000000000000000000000c",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Left",
+          "Right"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 12,
+        "nonEmptyCount": 12,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 2
+      }
+    },
+    {
+      "columnIndex": 13,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Long answers",
+      "notices": [
+        {
+          "kind": "long_options",
+          "message": "\"Long answers\" has 4 unusually long options. Each cell may hold several answers at once (a \"tick all that apply\" column). Import it as text if that is the case.",
+          "samples": [
+            "Answer 0: several symptoms reported together several symptom…",
+            "Answer 1: several symptoms reported together several symptom…",
+            "Answer 2: several symptoms reported together several symptom…"
+          ]
+        }
+      ],
+      "options": [
+        "Answer 0: several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together",
+        "Answer 1: several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together",
+        "Answer 2: several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together",
+        "Answer 3: several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together"
+      ],
+      "tempFieldId": "00000000000000000000000d",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Answer 0: several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together",
+          "Answer 1: several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together",
+          "Answer 2: several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together",
+          "Answer 3: several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together several symptoms reported together"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 4
+      }
+    },
+    {
+      "columnIndex": 14,
+      "corrections": [],
+      "detectedType": "text",
+      "fieldName": "Half unique",
+      "options": [],
+      "tempFieldId": "00000000000000000000000e",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Site 0",
+          "Site 1",
+          "Site 2",
+          "Site 3",
+          "Site 4",
+          "Site 5",
+          "Site 6",
+          "Site 7",
+          "Site 8",
+          "Site 9",
+          "Site 10",
+          "Site 11",
+          "Site 12",
+          "Site 13",
+          "Site 14",
+          "Site 15",
+          "Site 16",
+          "Site 17"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 33,
+        "nonEmptyCount": 33,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 18
+      }
+    },
+    {
+      "columnIndex": 15,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "At the limit",
+      "options": [
+        "Clinic 0",
+        "Clinic 1",
+        "Clinic 2",
+        "Clinic 3",
+        "Clinic 4",
+        "Clinic 5",
+        "Clinic 6",
+        "Clinic 7",
+        "Clinic 8",
+        "Clinic 9"
+      ],
+      "tempFieldId": "00000000000000000000000f",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Clinic 0",
+          "Clinic 1",
+          "Clinic 2",
+          "Clinic 3",
+          "Clinic 4",
+          "Clinic 5",
+          "Clinic 6",
+          "Clinic 7",
+          "Clinic 8",
+          "Clinic 9"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 20,
+        "nonEmptyCount": 20,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 10
+      }
+    },
+    {
+      "columnIndex": 16,
+      "corrections": [
+        {
+          "confidence": "MEDIUM",
+          "occurrences": [
+            {
+              "cell": "P9",
+              "columnIndex": 16,
+              "row": 9
+            }
+          ],
+          "suggested": [
+            "Yes"
+          ],
+          "value": "ye"
+        }
+      ],
+      "detectedType": "radio",
+      "fieldName": "Consent typo",
+      "options": [
+        "No",
+        "Yes",
+        "ye"
+      ],
+      "tempFieldId": "000000000000000000000010",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "No",
+          "Yes",
+          "ye"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 3
+      }
+    },
+    {
+      "columnIndex": 17,
+      "corrections": [],
+      "detectedType": "radio",
+      "fieldName": "Gender",
+      "options": [
+        "Male",
+        "Female",
+        "Femail"
+      ],
+      "tempFieldId": "000000000000000000000011",
+      "typeMetrics": {
+        "ambiguousCount": 0,
+        "candidateOptions": [
+          "Male",
+          "Female",
+          "Femail"
+        ],
+        "convertibleCount": 0,
+        "dateAmbiguousCount": 0,
+        "dateCount": 0,
+        "dateFormat": null,
+        "dateFormatConflict": false,
+        "dateParseableCount": 0,
+        "decimalCount": 0,
+        "invalidCount": 60,
+        "nonEmptyCount": 60,
+        "totalCount": 60,
+        "uniqueCapped": false,
+        "uniqueCount": 3
+      }
+    }
+  ],
+  "headers": {
+    "headers": [
+      "Smoker",
+      "Sex",
+      "Pain",
+      "Agreement",
+      "Blood group",
+      "Ward",
+      "Patient name",
+      "Stage",
+      "Codes as options",
+      "Flags",
+      "Tick all",
+      "Rare",
+      "Long answers",
+      "Half unique",
+      "At the limit",
+      "Consent typo",
+      "Gender"
+    ],
+    "ok": true
+  },
+  "source": "categories.xlsx"
+}
