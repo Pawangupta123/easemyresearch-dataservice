@@ -708,5 +708,248 @@
     ],
     "ok": true
   },
+  "samples": [
+    {
+      "header": "Smoker",
+      "ruleType": "radio",
+      "samples": [
+        "Yes",
+        "No",
+        "Yse",
+        "Nope"
+      ],
+      "tempFieldId": "000000000000000000000001"
+    },
+    {
+      "header": "Sex",
+      "ruleType": "radio",
+      "samples": [
+        "Male",
+        "Female",
+        "Femal"
+      ],
+      "tempFieldId": "000000000000000000000002"
+    },
+    {
+      "header": "Pain",
+      "ruleType": "radio",
+      "samples": [
+        "Severe",
+        "Mild",
+        "Moderate",
+        "None"
+      ],
+      "tempFieldId": "000000000000000000000003"
+    },
+    {
+      "header": "Agreement",
+      "ruleType": "radio",
+      "samples": [
+        "Agree",
+        "Neutral",
+        "Strongly agree",
+        "Disagree",
+        "Strongly disagree"
+      ],
+      "tempFieldId": "000000000000000000000004"
+    },
+    {
+      "header": "Blood group",
+      "ruleType": "radio",
+      "samples": [
+        "AB",
+        "O",
+        "B",
+        "A"
+      ],
+      "tempFieldId": "000000000000000000000005"
+    },
+    {
+      "header": "Ward",
+      "ruleType": "text",
+      "samples": [
+        "Ward 0",
+        "Ward 1",
+        "Ward 2",
+        "Ward 3",
+        "Ward 4",
+        "Ward 5",
+        "Ward 6",
+        "Ward 7",
+        "Ward 8",
+        "Ward 9",
+        "Ward 10",
+        "Ward 11",
+        "Ward 12",
+        "Ward 13",
+        "Ward 14",
+        "Ward 15",
+        "Ward 16",
+        "Ward 17",
+        "Ward 18",
+        "Ward 19",
+        "Ward 20",
+        "Ward 21",
+        "Ward 22",
+        "Ward 23",
+        "Ward 24"
+      ],
+      "tempFieldId": "000000000000000000000006"
+    },
+    {
+      "header": "Patient name",
+      "ruleType": "text",
+      "samples": [
+        "Patient 0",
+        "Patient 1",
+        "Patient 2",
+        "Patient 3",
+        "Patient 4",
+        "Patient 5",
+        "Patient 6",
+        "Patient 7",
+        "Patient 8",
+        "Patient 9",
+        "Patient 10",
+        "Patient 11",
+        "Patient 12",
+        "Patient 13",
+        "Patient 14",
+        "Patient 15",
+        "Patient 16",
+        "Patient 17",
+        "Patient 18",
+        "Patient 19",
+        "Patient 20",
+        "Patient 21",
+        "Patient 22",
+        "Patient 23",
+        "Patient 24"
+      ],
+      "tempFieldId": "000000000000000000000007"
+    },
+    {
+      "header": "Stage",
+      "ruleType": "radio",
+      "samples": [
+        "Stage IV",
+        "Stage I",
+        "Stage III",
+        "Stage II"
+      ],
+      "tempFieldId": "000000000000000000000008"
+    },
+    {
+      "header": "Codes as options",
+      "ruleType": "radio",
+      "samples": [
+        "10",
+        "2",
+        "33",
+        "4"
+      ],
+      "tempFieldId": "000000000000000000000009"
+    },
+    {
+      "header": "Flags",
+      "ruleType": "radio",
+      "samples": [
+        "true",
+        "false"
+      ],
+      "tempFieldId": "00000000000000000000000a"
+    },
+    {
+      "header": "Tick all",
+      "ruleType": "radio",
+      "samples": [
+        "Fever, cough, sore throat, headache, body ache Fever, cough, sore throat, headac",
+        "None"
+      ],
+      "tempFieldId": "00000000000000000000000b"
+    },
+    {
+      "header": "Rare",
+      "ruleType": "radio",
+      "samples": [
+        "Left",
+        "Right"
+      ],
+      "tempFieldId": "00000000000000000000000c"
+    },
+    {
+      "header": "Long answers",
+      "ruleType": "radio",
+      "samples": [
+        "Answer 0: several symptoms reported together several symptoms reported together ",
+        "Answer 1: several symptoms reported together several symptoms reported together ",
+        "Answer 2: several symptoms reported together several symptoms reported together ",
+        "Answer 3: several symptoms reported together several symptoms reported together "
+      ],
+      "tempFieldId": "00000000000000000000000d"
+    },
+    {
+      "header": "Half unique",
+      "ruleType": "text",
+      "samples": [
+        "Site 0",
+        "Site 1",
+        "Site 2",
+        "Site 3",
+        "Site 4",
+        "Site 5",
+        "Site 6",
+        "Site 7",
+        "Site 8",
+        "Site 9",
+        "Site 10",
+        "Site 11",
+        "Site 12",
+        "Site 13",
+        "Site 14",
+        "Site 15",
+        "Site 16",
+        "Site 17"
+      ],
+      "tempFieldId": "00000000000000000000000e"
+    },
+    {
+      "header": "At the limit",
+      "ruleType": "radio",
+      "samples": [
+        "Clinic 0",
+        "Clinic 1",
+        "Clinic 2",
+        "Clinic 3",
+        "Clinic 4",
+        "Clinic 5",
+        "Clinic 6",
+        "Clinic 7",
+        "Clinic 8",
+        "Clinic 9"
+      ],
+      "tempFieldId": "00000000000000000000000f"
+    },
+    {
+      "header": "Consent typo",
+      "ruleType": "radio",
+      "samples": [
+        "No",
+        "Yes",
+        "ye"
+      ],
+      "tempFieldId": "000000000000000000000010"
+    },
+    {
+      "header": "Gender",
+      "ruleType": "radio",
+      "samples": [
+        "Male",
+        "Female",
+        "Femail"
+      ],
+      "tempFieldId": "000000000000000000000011"
+    }
+  ],
   "source": "categories.xlsx"
 }

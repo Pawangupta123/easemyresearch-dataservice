@@ -15,6 +15,7 @@ Coordinates are absolute (row 0 = sheet row 1, the header), as Node's sheet rang
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from io import BytesIO
 
 from python_calamine import CalamineWorkbook
 
@@ -81,15 +82,19 @@ def to_cell(value: object) -> Cell:
     return None
 
 
-def read_first_sheet(path: str) -> Sheet | None:
-    """The workbook's first sheet, or None when it has none."""
-    workbook = CalamineWorkbook.from_path(path)
+def read_first_sheet(source: str | bytes) -> Sheet | None:
+    """The workbook's first sheet (from a path or the file's bytes), or None when it has none."""
+    workbook = (
+        CalamineWorkbook.from_path(source)
+        if isinstance(source, str)
+        else CalamineWorkbook.from_filelike(BytesIO(source))
+    )
     if not workbook.sheet_names:
         return None
     raw: Sequence[Sequence[object]] = workbook.get_sheet_by_index(0).to_python(skip_empty_area=False)
     width = max((len(row) for row in raw), default=0)
     rows = [[to_cell(value) for value in row] + [None] * (width - len(row)) for row in raw]
-    for (r, c), label in text_label_cells(path).items():
+    for (r, c), label in text_label_cells(source).items():
         if r < len(rows) and c < width:
             rows[r][c] = label
     return Sheet(rows=rows, column_count=width)

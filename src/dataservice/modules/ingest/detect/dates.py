@@ -9,6 +9,7 @@ import calendar
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Literal
 
 from dataservice.modules.ingest.detect import js
@@ -104,6 +105,8 @@ CATALOG: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], DateClass]], ...
 )  # fmt: skip
 
 
+# Pure and called for every cell: each distinct value is classified once (typed: True ≠ 1.0).
+@lru_cache(maxsize=65_536, typed=True)
 def classify(raw: str) -> DateClass:
     value = js.trim(raw)
     if not value:

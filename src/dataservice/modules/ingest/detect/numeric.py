@@ -5,7 +5,8 @@ anchors that never let a trailing newline through (fullmatch).
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from functools import lru_cache
 from typing import Literal
 
 from dataservice.modules.ingest.detect import js
@@ -45,7 +46,7 @@ class Classification:
     normalized_raw: str = ""
     has_digits: bool = False
     parsed_value: float | None = None
-    suggested_values: list[float] = field(default_factory=list)
+    suggested_values: tuple[float, ...] = ()
     is_decimal_like: bool = False
 
 
@@ -102,6 +103,8 @@ def is_time_like(raw: object) -> bool:
     return _TIME.fullmatch(normalized) is not None or _TIME_RANGE.fullmatch(normalized) is not None
 
 
+# Pure and called for every cell: each distinct value is classified once (typed: True ≠ 1.0).
+@lru_cache(maxsize=65_536, typed=True)
 def classify(value: str | float | bool | None) -> Classification:
     """classifyNumericImportValue — `value` is the resolved cell (dates already ISO text)."""
     if value is None:
@@ -111,7 +114,7 @@ def classify(value: str | float | bool | None) -> Classification:
             return EMPTY
         text = js.number_to_string(value)
         return Classification(
-            "convertible", text, text.lower(), True, value, [], is_decimal_like=not value.is_integer()
+            "convertible", text, text.lower(), True, value, (), is_decimal_like=not value.is_integer()
         )
     raw = js.trim(js.to_string(value))
     if raw == "":
@@ -131,19 +134,23 @@ def classify(value: str | float | bool | None) -> Classification:
             parsed = float(candidate)
             if js.is_finite(parsed):
                 suggested.append(parsed)
-        return Classification("ambiguous", raw, normalized, has_digits, None, suggested)
+        return Classification("ambiguous", raw, normalized, has_digits, None, tuple(suggested))
     if has_letters:
-        return Classification("invalid_text", raw, normalized, has_digits, None, extract_suggestions(raw))
+        return Classification("invalid_text", raw, normalized, has_digits, None, tuple(extract_suggestions(raw)))
     if not has_digits:
         return Classification("invalid_text", raw, normalized, False)
 
     cleaned = clean_candidate(raw)
     if not is_strict(cleaned):
-        return Classification("invalid_numeric_format", raw, normalized, has_digits, None, extract_suggestions(raw))
+        return Classification(
+            "invalid_numeric_format", raw, normalized, has_digits, None, tuple(extract_suggestions(raw))
+        )
     parsed = float(cleaned)
     if not js.is_finite(parsed):
-        return Classification("invalid_numeric_format", raw, normalized, has_digits, None, extract_suggestions(raw))
+        return Classification(
+            "invalid_numeric_format", raw, normalized, has_digits, None, tuple(extract_suggestions(raw))
+        )
     changed = _SPACES.sub("", raw) != js.number_to_string(parsed)
     return Classification(
-        "convertible", raw, normalized, has_digits, parsed, [parsed] if changed else [], is_decimal_like="." in cleaned
+        "convertible", raw, normalized, has_digits, parsed, (parsed,) if changed else (), is_decimal_like="." in cleaned
     )

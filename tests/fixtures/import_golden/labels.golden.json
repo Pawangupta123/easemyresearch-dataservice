@@ -135,5 +135,51 @@
     ],
     "ok": true
   },
+  "samples": [
+    {
+      "header": "Consent",
+      "ruleType": "radio",
+      "samples": [
+        "No",
+        "Yes"
+      ],
+      "tempFieldId": "000000000000000000000001"
+    },
+    {
+      "header": "Plain number",
+      "ruleType": "radio",
+      "samples": [
+        "0",
+        "1"
+      ],
+      "tempFieldId": "000000000000000000000002"
+    },
+    {
+      "header": "Percent",
+      "ruleType": "number",
+      "samples": [
+        "0",
+        "0.1",
+        "0.2",
+        "0.3",
+        "0.4",
+        "0.5",
+        "0.6",
+        "0.7",
+        "0.8",
+        "0.9"
+      ],
+      "tempFieldId": "000000000000000000000003"
+    },
+    {
+      "header": "Sections",
+      "ruleType": "radio",
+      "samples": [
+        "No",
+        "Yes"
+      ],
+      "tempFieldId": "000000000000000000000004"
+    }
+  ],
   "source": "labels.xlsx"
 }

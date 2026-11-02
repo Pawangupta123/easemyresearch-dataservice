@@ -1,6 +1,38 @@
 {
   "components": {
     "schemas": {
+      "AiSample": {
+        "additionalProperties": false,
+        "properties": {
+          "header": {
+            "title": "Header",
+            "type": "string"
+          },
+          "ruleType": {
+            "title": "Ruletype",
+            "type": "string"
+          },
+          "samples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
+          "tempFieldId": {
+            "title": "Tempfieldid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tempFieldId",
+          "header",
+          "ruleType",
+          "samples"
+        ],
+        "title": "AiSample",
+        "type": "object"
+      },
       "ApiResponse_CellsRead_": {
         "properties": {
           "data": {
@@ -133,6 +165,28 @@
         "title": "ApiResponse[TableCreated]",
         "type": "object"
       },
+      "ApiResponse_UploadDetected_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UploadDetected"
+          },
+          "message": {
+            "default": "Success",
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ApiResponse[UploadDetected]",
+        "type": "object"
+      },
       "Cell": {
         "properties": {
           "target": {
@@ -242,6 +296,46 @@
         "title": "CellsReadRequest",
         "type": "object"
       },
+      "Correction": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "enum": [
+              "HIGH",
+              "MEDIUM",
+              "LOW"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/components/schemas/Occurrence"
+            },
+            "title": "Occurrences",
+            "type": "array"
+          },
+          "suggested": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested",
+            "type": "array"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "suggested",
+          "confidence",
+          "occurrences"
+        ],
+        "title": "Correction",
+        "type": "object"
+      },
       "DrainAccepted": {
         "properties": {
           "started": {
@@ -292,6 +386,45 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeaderCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "headers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "HeaderCheck",
         "type": "object"
       },
       "HealthData": {
@@ -360,6 +493,61 @@
         "title": "ManifestDto",
         "type": "object"
       },
+      "Notice": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "long_options",
+              "multi_value_numbers"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "samples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Samples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "message",
+          "samples"
+        ],
+        "title": "Notice",
+        "type": "object"
+      },
+      "Occurrence": {
+        "additionalProperties": false,
+        "properties": {
+          "cell": {
+            "title": "Cell",
+            "type": "string"
+          },
+          "columnIndex": {
+            "title": "Columnindex",
+            "type": "integer"
+          },
+          "row": {
+            "title": "Row",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "columnIndex",
+          "cell"
+        ],
+        "title": "Occurrence",
+        "type": "object"
+      },
       "PatchRangeDto": {
         "additionalProperties": false,
         "properties": {
@@ -379,6 +567,68 @@
           "toSeq"
         ],
         "title": "PatchRangeDto",
+        "type": "object"
+      },
+      "PreviewField": {
+        "additionalProperties": false,
+        "properties": {
+          "columnIndex": {
+            "title": "Columnindex",
+            "type": "integer"
+          },
+          "corrections": {
+            "items": {
+              "$ref": "#/components/schemas/Correction"
+            },
+            "title": "Corrections",
+            "type": "array"
+          },
+          "detectedType": {
+            "enum": [
+              "text",
+              "number",
+              "date",
+              "radio"
+            ],
+            "title": "Detectedtype",
+            "type": "string"
+          },
+          "fieldName": {
+            "title": "Fieldname",
+            "type": "string"
+          },
+          "notices": {
+            "items": {
+              "$ref": "#/components/schemas/Notice"
+            },
+            "title": "Notices",
+            "type": "array"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "tempFieldId": {
+            "title": "Tempfieldid",
+            "type": "string"
+          },
+          "typeMetrics": {
+            "$ref": "#/components/schemas/TypeMetrics"
+          }
+        },
+        "required": [
+          "tempFieldId",
+          "fieldName",
+          "columnIndex",
+          "detectedType",
+          "options",
+          "corrections",
+          "typeMetrics"
+        ],
+        "title": "PreviewField",
         "type": "object"
       },
       "Row": {
@@ -740,6 +990,152 @@
           "base"
         ],
         "title": "TablesDto",
+        "type": "object"
+      },
+      "TypeMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguousCount": {
+            "title": "Ambiguouscount",
+            "type": "integer"
+          },
+          "candidateOptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Candidateoptions",
+            "type": "array"
+          },
+          "convertibleCount": {
+            "title": "Convertiblecount",
+            "type": "integer"
+          },
+          "dateAmbiguousCount": {
+            "title": "Dateambiguouscount",
+            "type": "integer"
+          },
+          "dateCount": {
+            "title": "Datecount",
+            "type": "integer"
+          },
+          "dateFormat": {
+            "anyOf": [
+              {
+                "enum": [
+                  "DMY",
+                  "MDY"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dateformat"
+          },
+          "dateFormatConflict": {
+            "title": "Dateformatconflict",
+            "type": "boolean"
+          },
+          "dateParseableCount": {
+            "title": "Dateparseablecount",
+            "type": "integer"
+          },
+          "decimalCount": {
+            "title": "Decimalcount",
+            "type": "integer"
+          },
+          "invalidCount": {
+            "title": "Invalidcount",
+            "type": "integer"
+          },
+          "nonEmptyCount": {
+            "title": "Nonemptycount",
+            "type": "integer"
+          },
+          "totalCount": {
+            "title": "Totalcount",
+            "type": "integer"
+          },
+          "uniqueCapped": {
+            "title": "Uniquecapped",
+            "type": "boolean"
+          },
+          "uniqueCount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uniquecount"
+          }
+        },
+        "required": [
+          "totalCount",
+          "nonEmptyCount",
+          "uniqueCount",
+          "uniqueCapped",
+          "convertibleCount",
+          "ambiguousCount",
+          "invalidCount",
+          "decimalCount",
+          "dateCount",
+          "dateParseableCount",
+          "dateAmbiguousCount",
+          "dateFormat",
+          "dateFormatConflict",
+          "candidateOptions"
+        ],
+        "title": "TypeMetrics",
+        "type": "object"
+      },
+      "UploadDetectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "UploadDetectRequest",
+        "type": "object"
+      },
+      "UploadDetected": {
+        "additionalProperties": false,
+        "description": "A refused header row comes back with `headers.ok` false and no fields (Node fails the job\nwith its message, as it does today).",
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "headers": {
+            "$ref": "#/components/schemas/HeaderCheck"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/AiSample"
+            },
+            "title": "Samples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "headers",
+          "fields",
+          "samples"
+        ],
+        "title": "UploadDetected",
         "type": "object"
       },
       "ValidationError": {
@@ -1108,6 +1504,74 @@
         "summary": "Create Dataset Table",
         "tags": [
           "datasets"
+        ]
+      }
+    },
+    "/v1/datasets/{dataset_id}/upload:detect": {
+      "post": {
+        "operationId": "detect_upload_v1_datasets__dataset_id__upload_detect_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadDetectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_UploadDetected_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Detect Upload",
+        "tags": [
+          "ingest"
         ]
       }
     },

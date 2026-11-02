@@ -320,5 +320,111 @@
     ],
     "ok": true
   },
+  "samples": [
+    {
+      "header": "ID",
+      "ruleType": "text",
+      "samples": [
+        "P-0000",
+        "P-0001",
+        "P-0002",
+        "P-0003",
+        "P-0004",
+        "P-0005",
+        "P-0006",
+        "P-0007",
+        "P-0008",
+        "P-0009",
+        "P-0010",
+        "P-0011",
+        "P-0012",
+        "P-0013",
+        "P-0014",
+        "P-0015",
+        "P-0016",
+        "P-0017",
+        "P-0018",
+        "P-0019",
+        "P-0020",
+        "P-0021",
+        "P-0022",
+        "P-0023",
+        "P-0024"
+      ],
+      "tempFieldId": "000000000000000000000001"
+    },
+    {
+      "header": "Spaces",
+      "ruleType": "radio",
+      "samples": [
+        "padded",
+        "nbsp",
+        "bom",
+        "tab",
+        "plain"
+      ],
+      "tempFieldId": "000000000000000000000002"
+    },
+    {
+      "header": "Lines",
+      "ruleType": "radio",
+      "samples": [
+        "line one\nline two",
+        "single"
+      ],
+      "tempFieldId": "000000000000000000000003"
+    },
+    {
+      "header": "Empty column",
+      "ruleType": "text",
+      "samples": [],
+      "tempFieldId": "000000000000000000000004"
+    },
+    {
+      "header": "Whitespace only",
+      "ruleType": "text",
+      "samples": [],
+      "tempFieldId": "000000000000000000000005"
+    },
+    {
+      "header": "Unicode",
+      "ruleType": "radio",
+      "samples": [
+        "हाँ",
+        "नहीं",
+        "हा"
+      ],
+      "tempFieldId": "000000000000000000000006"
+    },
+    {
+      "header": "Emoji",
+      "ruleType": "radio",
+      "samples": [
+        "😀 happy",
+        "😢 sad",
+        "😀 hapy"
+      ],
+      "tempFieldId": "000000000000000000000007"
+    },
+    {
+      "header": "Rich",
+      "ruleType": "radio",
+      "samples": [
+        "Bold 0",
+        "Bold 1",
+        "Bold 2"
+      ],
+      "tempFieldId": "000000000000000000000008"
+    },
+    {
+      "header": "CRLF",
+      "ruleType": "radio",
+      "samples": [
+        "first\nsecond",
+        "one line"
+      ],
+      "tempFieldId": "000000000000000000000009"
+    }
+  ],
   "source": "structure.xlsx"
 }

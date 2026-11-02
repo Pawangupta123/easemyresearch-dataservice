@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from dataservice.modules.ingest.detect.cells import read_first_sheet, validate_headers
-from dataservice.modules.ingest.detect.preview import preview_fields
+from dataservice.modules.ingest.detect.preview import ai_samples, preview_fields
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "import_golden"
 WORKBOOKS = sorted(FIXTURES.glob("*.xlsx"))
@@ -24,10 +24,12 @@ def _detect(path: Path) -> dict[str, object]:
         counter += 1
         return f"{counter:024x}"
 
+    fields = preview_fields(sheet, new_id)
     return {
         "source": path.name,
         "headers": validate_headers(sheet.row(0)),
-        "fields": preview_fields(sheet, new_id),
+        "fields": fields,
+        "samples": ai_samples(sheet, fields),
     }
 
 
@@ -42,6 +44,7 @@ def test_detection_matches_node(workbook: Path) -> None:
     expected = json.loads(workbook.with_suffix(".golden.json").read_text(encoding="utf-8"))
     actual = json.loads(json.dumps(_detect(workbook)))
     assert actual["headers"] == expected["headers"]
+    assert actual["samples"] == expected["samples"]
     assert len(actual["fields"]) == len(expected["fields"])
     for mine, node in zip(actual["fields"], expected["fields"], strict=True):
         for key in sorted(set(mine) | set(node)):

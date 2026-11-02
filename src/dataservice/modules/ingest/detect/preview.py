@@ -3,9 +3,11 @@ field per header with its detected type, options, suggested corrections, notices
 evidence behind them (typeMetrics), in the exact JSON shape Node stores (camelCase)."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 
 from dataservice.modules.ingest.detect import choices, dates, js
-from dataservice.modules.ingest.detect.cells import Sheet, header_of, last_meaningful_row, resolve
+from dataservice.modules.ingest.detect.cells import Sheet, cell_text, header_of, last_meaningful_row, resolve
 from dataservice.modules.ingest.detect.stats import (
     IMPORT_NOTICE_SAMPLE_LIMIT,
     ColumnStats,
@@ -138,3 +140,46 @@ def preview_fields(sheet: Sheet, new_id: Callable[[], str]) -> list[Json]:
                 column_stats.date_count += 1
             register_cell(column_stats, value, column, row_number)
     return [_field(ids[i], headers[i], i + 1, stats[i]) for i in range(len(headers))]
+
+
+AI_DETECT_SAMPLE_LIMIT = 25
+AI_DETECT_MAX_SAMPLE_LENGTH = 80
+
+
+@dataclass
+class _Samples:
+    field: Json
+    column: int
+    values: list[str] = dc_field(default_factory=list)
+    seen: set[str] = dc_field(default_factory=set)
+
+
+def ai_samples(sheet: Sheet, fields: list[Json], limit: int = AI_DETECT_SAMPLE_LIMIT) -> list[Json]:
+    """collectAiDetectionColumns: up to `limit` distinct (case-insensitive) values per column, each
+    cut to AI_DETECT_MAX_SAMPLE_LENGTH — what Node's AI type refinement classifies."""
+    columns = [_Samples(field, int(str(field["columnIndex"])) - 1) for field in fields]
+    last_row = last_meaningful_row(sheet, sheet.column_count)
+    for row_number in range(2, last_row + 1):
+        row = sheet.row(row_number - 1)
+        all_full = True
+        for column in columns:
+            if len(column.values) >= limit:
+                continue
+            all_full = False
+            text = cell_text(row[column.column]) if column.column < len(row) else ""
+            if not text or text.lower() in column.seen:
+                continue
+            column.seen.add(text.lower())
+            too_long = js.length(text) > AI_DETECT_MAX_SAMPLE_LENGTH
+            column.values.append(js.slice_units(text, AI_DETECT_MAX_SAMPLE_LENGTH) if too_long else text)
+        if all_full:
+            break
+    return [
+        {
+            "tempFieldId": column.field["tempFieldId"],
+            "header": column.field["fieldName"],
+            "ruleType": column.field["detectedType"],
+            "samples": column.values,
+        }
+        for column in columns
+    ]

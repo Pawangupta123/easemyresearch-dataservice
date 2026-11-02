@@ -23,7 +23,7 @@ class Occurrence:
 @dataclass
 class NumericCorrection:
     value: str
-    suggested: list[float]
+    suggested: tuple[float, ...]
     confidence: Confidence
     occurrences: list[Occurrence] = field(default_factory=list)
 
@@ -58,7 +58,7 @@ def _register_numeric(
     raw: str,
     occurrence: Occurrence,
     confidence: Confidence,
-    suggested: list[float],
+    suggested: tuple[float, ...],
 ) -> None:
     entry = stats.numeric_corrections.get(normalized)
     if entry is None:
@@ -101,7 +101,7 @@ def register_cell(stats: ColumnStats, value: str | float | bool, column: int, ro
         if len(stats.multi_value_samples) < IMPORT_NOTICE_SAMPLE_LIMIT:
             stats.multi_value_samples.append(raw)
     if classified.has_digits:
-        _register_numeric(stats, normalized, raw, occurrence, "LOW", [])
+        _register_numeric(stats, normalized, raw, occurrence, "LOW", ())
 
 
 def detect_type(stats: ColumnStats) -> DetectedType:

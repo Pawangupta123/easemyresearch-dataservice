@@ -10,6 +10,7 @@ import posixpath
 import re
 import zipfile
 from collections.abc import Iterator
+from io import BytesIO
 from xml.etree import ElementTree
 
 from dataservice.modules.ingest.detect import js
@@ -142,9 +143,9 @@ def _numeric_cells(archive: zipfile.ZipFile, path: str, styles: dict[int, str]) 
             element.clear()
 
 
-def text_label_cells(path: str) -> dict[tuple[int, int], str]:
+def text_label_cells(source: str | bytes) -> dict[tuple[int, int], str]:
     """(row, column) → the label shown, for the first sheet's label-formatted numbers (0-based)."""
-    with zipfile.ZipFile(path) as archive:
+    with zipfile.ZipFile(source if isinstance(source, str) else BytesIO(source)) as archive:
         styles = _label_styles(archive)
         if not styles:
             return {}

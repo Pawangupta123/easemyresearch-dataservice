@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # The writer renews its lease this often; Node's lease lives DATA_SERVICE_LEASE_TTL_MS (60 s).
     writer_lease_renew_seconds: float = Field(default=15.0, gt=0)
 
+    # Uploads (Node's AWS_S3_IMPORT_BUCKET): the only bucket an upload is read from, and only under
+    # `imports/` (where Node's presigned uploads land). Unset: upload routes refuse to serve.
+    import_bucket: str | None = None
+    # The largest upload read into memory to detect its columns.
+    import_max_bytes: int = Field(default=100 * 1024 * 1024, ge=1)
+
     @model_validator(mode="after")
     def _refuse_unsafe_commits(self) -> "Settings":
         if self.aws_s3_allow_unsafe_rename:

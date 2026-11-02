@@ -11,6 +11,7 @@ from dataservice.config import get_settings
 from dataservice.config.logging import configure_logging
 from dataservice.modules.datasets.router import router as datasets_router
 from dataservice.modules.health.router import router as health_router
+from dataservice.modules.ingest.router import router as ingest_router
 from dataservice.modules.writer.router import router as writer_router
 from dataservice.storage.reader import ReaderLimits, configure
 
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router, dependencies=[Depends(require_service_token)])
     app.include_router(datasets_router)  # each route takes the scoped dataset token itself
     app.include_router(writer_router)  # Node's 'job' token; the writer then signs its calls to Node
+    app.include_router(ingest_router)  # Node's 'job' token for the dataset reserved for an upload
     return app
 
 

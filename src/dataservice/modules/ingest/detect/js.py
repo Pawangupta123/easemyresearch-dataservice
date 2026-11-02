@@ -8,6 +8,7 @@ removes a BOM (Python's strip does not), `"Number(" 0x1F ")"` is 31, an emoji is
 import math
 import re
 from decimal import Decimal
+from functools import lru_cache
 
 # JavaScript's WhiteSpace + LineTerminator — what `trim` removes and `\s` matches.
 JS_SPACE = (  # written as escapes on purpose: most of these characters are invisible
@@ -54,6 +55,8 @@ def is_finite(value: float) -> bool:
     return math.isfinite(value)
 
 
+# Pure and called for every cell: each distinct value is classified once (typed: True ≠ 1.0).
+@lru_cache(maxsize=65_536, typed=True)
 def number_to_string(value: float) -> str:
     """JavaScript's `String(number)` (Number::toString, radix 10)."""
     if math.isnan(value):
